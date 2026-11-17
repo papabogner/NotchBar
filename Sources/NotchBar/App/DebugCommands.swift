@@ -7,7 +7,7 @@ import ApplicationServices
 /// Only active when launched with `NOTCHBAR_DEBUG=1`. Post the distributed notification
 /// `com.local.notchbar.debug` with one of these as its object:
 /// `open:<tab>` (home, media, claude, timer, clipboard, calendar, activity), `media`, `claude`, `timer`,
-/// `clipboard`, `calendar`, `activity`, `close`, `peek`, `volume`,
+/// `clipboard`, `calendar`, `activity`, `camera` (toggles the camera glance), `close`, `peek`, `volume`,
 /// `brightness`, `timer5s`, `toggle` (play/pause), `dismiss`, `hover`, `shot:<path.png>` to save the window, or
 /// `state:<path.json>` to save what the notch currently shows, or `axtabs:<path.txt>` to dump
 /// how Chrome describes its YouTube tabs to Accessibility.
@@ -37,6 +37,7 @@ enum DebugCommands {
         case "calendar": vm.open(.calendar)
         case "activity": vm.open(.activity)
         case "close": vm.close()
+        case "camera": vm.toggleCamera()
         case "peek": vm.show(.nowPlaying)
         case "volume": vm.show(.hud(HUDState(kind: .volume, value: audio.volume, muted: audio.isMuted)))
         case "brightness": vm.show(.hud(HUDState(kind: .brightness, value: vm.hudService.brightness.brightness ?? 0.5, muted: false)))

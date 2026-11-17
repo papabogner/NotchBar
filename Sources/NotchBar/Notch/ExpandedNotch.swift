@@ -12,7 +12,7 @@ struct ExpandedNotch: View {
         VStack(spacing: 0) {
             header.frame(height: vm.geometry.notchHeight)
             ZStack(alignment: .top) {
-                content.transition(.notchContent).id(vm.tab)
+                content.transition(.notchContent).id(vm.showsCamera ? "camera" : vm.tab.rawValue)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, vm.topRadius + 16)
@@ -24,6 +24,14 @@ struct ExpandedNotch: View {
     }
 
     @ViewBuilder private var content: some View {
+        if vm.showsCamera {
+            CameraGlancePanel(camera: vm.camera) { vm.toggleCamera() }
+        } else {
+            tabContent
+        }
+    }
+
+    @ViewBuilder private var tabContent: some View {
         switch vm.tab {
         case .home:
             HomePanel(vm: vm, media: media, usage: usage, timer: timer, calendar: vm.calendar, weather: vm.weather)
@@ -77,6 +85,7 @@ struct ExpandedNotch: View {
             Spacer(minLength: vm.geometry.notchWidth + 16)
 
             HStack(spacing: 7) {
+                CameraButton(isOn: vm.showsCamera) { vm.toggleCamera() }
                 BatteryIndicator()
                 CircleIconButton(systemName: "lock.fill", size: 24, iconSize: 10.5, help: "Lock Screen") {
                     vm.close()
@@ -93,7 +102,7 @@ struct ExpandedNotch: View {
     }
 
     private func tabButton(_ tab: NotchViewModel.Tab, showsLabel: Bool) -> some View {
-        let selected = vm.tab == tab
+        let selected = vm.tab == tab && !vm.showsCamera
         return Button { vm.select(tab) } label: {
             HStack(spacing: 5) {
                 icon(for: tab)
@@ -126,5 +135,28 @@ struct ExpandedNotch: View {
         case .calendar: Image(systemName: "calendar").font(.system(size: 11, weight: .semibold))
         case .activity: Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 11, weight: .semibold))
         }
+    }
+}
+
+/// The header's camera button. It lights up green, like the camera's own light, while the
+/// glance is open.
+private struct CameraButton: View {
+    var isOn: Bool
+    var action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "web.camera.fill")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(isOn ? Color.black : .white.opacity(hover ? 1 : 0.8))
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(isOn ? Color.green : .white.opacity(hover ? 0.18 : 0.09)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressableStyle())
+        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hover = h } }
+        .animation(.easeOut(duration: 0.2), value: isOn)
+        .help(isOn ? "Close Camera" : "Camera")
     }
 }

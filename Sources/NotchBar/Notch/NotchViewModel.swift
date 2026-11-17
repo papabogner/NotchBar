@@ -59,6 +59,9 @@ final class NotchViewModel: ObservableObject {
     @Published private(set) var enabledTabs: [Tab]
     /// Opened from the keyboard: stays open until the pointer visits or a click lands elsewhere.
     @Published var isSticky = false
+    /// The camera glance from the header's camera button. It replaces the tab's content and
+    /// turns off whenever the notch closes or another tab is picked.
+    @Published private(set) var showsCamera = false
     /// Leaves the notch out of screenshots, screen recordings and screen sharing.
     @Published var hideFromScreenshots: Bool { didSet { UserDefaults.standard.set(hideFromScreenshots, forKey: "hideFromScreenshots") } }
 
@@ -71,6 +74,7 @@ final class NotchViewModel: ObservableObject {
     let weather: WeatherStore
     let dictation: DictationMonitor
     let activity: ActivityMonitor
+    let camera = CameraGlance()
 
     static let openSpring = Animation.spring(response: 0.42, dampingFraction: 0.76)
     static let closeSpring = Animation.spring(response: 0.36, dampingFraction: 0.95)
@@ -112,6 +116,14 @@ final class NotchViewModel: ObservableObject {
             .sink { [weak self] expanded, tab in
                 guard let self else { return }
                 activity.setActive(expanded && (tab == .activity || (tab == .home && self.isEnabled(.activity))))
+            }
+            .store(in: &bag)
+        // The camera runs only while its preview can be seen.
+        Publishers.CombineLatest($isExpanded, $showsCamera)
+            .sink { [weak self] expanded, showsCamera in
+                guard let self else { return }
+                if !expanded && showsCamera { self.showsCamera = false }
+                self.camera.setActive(expanded && showsCamera)
             }
             .store(in: &bag)
         media.onNeedsAccessibility = { [weak self] app in
@@ -180,6 +192,7 @@ final class NotchViewModel: ObservableObject {
     var expandedSize: CGSize {
         let content: CGFloat
         switch tab {
+        case _ where showsCamera: content = 262
         case .home: content = 346
         case .calendar, .activity: content = 222
         default: content = 150
@@ -223,18 +236,30 @@ final class NotchViewModel: ObservableObject {
         bannerWork?.cancel()
         withAnimation(Self.openSpring) {
             self.tab = target
+            showsCamera = false
             banner = nil
             isExpanded = true
         }
     }
 
     func select(_ tab: Tab) {
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) { self.tab = tab }
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+            self.tab = tab
+            showsCamera = false
+        }
+    }
+
+    /// The header's camera button: a quick look in the camera, or back to the tab.
+    func toggleCamera() {
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) { showsCamera.toggle() }
     }
 
     func close() {
         isSticky = false
-        withAnimation(Self.closeSpring) { isExpanded = false }
+        withAnimation(Self.closeSpring) {
+            isExpanded = false
+            showsCamera = false
+        }
     }
 
     /// ⌃⌘V: show the clipboard, or hide it if it's already showing.

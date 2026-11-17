@@ -6,7 +6,7 @@
 
 **Your MacBook notch, as a Dynamic Island.**
 
-Music, meetings, Claude usage, system activity, timers, clipboard and headphones, right where your camera is.
+Music, meetings, Claude usage, system activity, timers, clipboard, headphones and a camera mirror, right where your camera is.
 Native SwiftUI, no dependencies, and almost no battery.
 
 [![Build](https://github.com/srisanthosh/NotchBar/actions/workflows/build.yml/badge.svg)](https://github.com/srisanthosh/NotchBar/actions/workflows/build.yml)
@@ -35,7 +35,7 @@ The notch is dead space on every modern MacBook. NotchBar puts it to work withou
 - **One click away.** Hover for a small grow and a trackpad haptic. Click to open. Move away and it closes.
 - **Native.** Spring animations, SF Symbols, system materials and haptics. No web views, no Electron.
 - **Light.** 0.1% CPU at rest and 52 MB of memory, measured on the finished build. See [Performance](#performance).
-- **Private.** Nothing leaves your Mac unless you turn on weather. NotchBar never reads passwords or tokens.
+- **Private.** Nothing leaves your Mac unless you turn on weather. NotchBar never reads passwords or tokens, and the camera is only on while you look at it.
 
 ## Features
 
@@ -113,6 +113,21 @@ Banners drop from the notch for a moment, then tuck back in.
 
 </details>
 
+### Camera glance
+
+<table>
+<tr><td width="50%">
+
+**A mirror in the notch.** Click the camera button beside the battery to see yourself in a live, mirrored view. Check your hair or your background before a call, then move on.
+
+- The camera runs only while the view is on screen. It turns off when the notch closes, you pick a tab, or you click the button again.
+- The button turns green while the camera is on.
+- It uses your Mac's built-in camera, so an iPhone nearby isn't woken through Continuity Camera.
+- Nothing is recorded or saved.
+
+</td><td><img src="docs/screenshots/22-camera.png" alt="Camera glance in the open notch, with the camera button lit green beside the battery"></td></tr>
+</table>
+
 ## Install
 
 ### Download
@@ -164,6 +179,7 @@ Nothing is asked for at launch. Each permission comes up the first time you use 
 | Controlling browsers, instant pause detection in Chrome, paste, replacing the system HUD | Accessibility | When you first use one of them |
 | Calendar tab and Up Next | Calendars | When you click **Allow** in the tab |
 | Weather | Location | When you click **Show Weather** |
+| Camera glance | Camera | The first time you click the camera button |
 | Artist, artwork and progress from Chrome or Safari | **Allow JavaScript from Apple Events**, a browser setting | You turn it on yourself: Chrome's **View > Developer** menu, or Safari's **Develop** menu |
 
 Detecting which app is playing, dictation and headphones need no permission at all.
@@ -297,6 +313,7 @@ flowchart LR
 
 - **Stays on your Mac.** Everything NotchBar reads stays on your Mac. The only network request is weather, once you turn it on, and the location it sends is rounded to about a kilometre.
 - **No content.** NotchBar sees that an app uses the microphone, never what it hears.
+- **Camera.** The camera runs only while the camera glance is on screen. Nothing is recorded or saved.
 - **No secrets.** NotchBar never reads passwords, tokens or keychain items.
 - **Clipboard.** Concealed items and password managers are skipped.
 
@@ -395,6 +412,7 @@ Sources/NotchBar/
     Home/       The master page and its compact widgets
     Calendar/   EventKit store, calendar panel, meeting reminders and snooze
     Activity/   CPU, memory, network, disk and top processes, sampled while visible
+    Camera/     The camera glance, running only while it's visible
     Weather/    Opt-in weather from Open-Meteo
     MenuBar/    The menu bar organizer
     Dictation/  Shows dictation apps like Handy while they listen
@@ -414,6 +432,7 @@ Each feature has the same shape. A `@MainActor` `ObservableObject` owns the stat
 - [x] Clipboard history
 - [x] Headphones, dictation, volume and brightness banners
 - [x] Activity monitor
+- [x] Camera glance
 - [ ] Notifications in the notch
 - [ ] More Live Activities
 - [ ] A <kbd>⌘</kbd><kbd>K</kbd> command palette

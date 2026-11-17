@@ -188,6 +188,7 @@ enum Snapshotter {
         render("19b-clipboard-empty", clipboard: ClipboardStore(persist: false), configure: expanded(.clipboard))
         render("20-calendar", configure: expanded(.calendar))
         render("21-activity", configure: expanded(.activity))
+        render("22-camera") { $0.isExpanded = true; $0.tab = .home; $0.toggleCamera() }
     }
 
     private static func sampleArtwork() -> NSImage {
