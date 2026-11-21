@@ -88,6 +88,11 @@ Banners drop from the notch for a moment, then tuck back in.
 **Activity.** CPU, memory pressure, swap, network and disk, with the apps using the most CPU. It only measures while you're looking, and **Open Activity Monitor** is one click away.
 
 </td><td><img src="docs/screenshots/21-activity.png" alt="Activity tab with CPU and memory rings, network and disk rates, and the top processes"></td></tr>
+<tr><td colspan="2">
+
+**Mixer.** A slider and mute button for each app that's playing, on macOS 14.4 and later. Drag one app down without changing the system volume. At 100% that app is left alone, and nothing is recorded or stored. Hide it from **… > Show Tabs**.
+
+</td></tr>
 <tr><td>
 
 **Clipboard.** Your last 60 copies: text, links, images and files. Click to copy again, or paste, pin or delete, and **Clear** the whole history. Press <kbd>⌃</kbd><kbd>⌘</kbd><kbd>V</kbd> anywhere to open it. Password managers and concealed items are skipped.
@@ -180,9 +185,10 @@ Nothing is asked for at launch. Each permission comes up the first time you use 
 | Calendar tab and Up Next | Calendars | When you click **Allow** in the tab |
 | Weather | Location | When you click **Show Weather** |
 | Camera glance | Camera | The first time you click the camera button |
+| Mixer | System audio recording | The first time you move a slider |
 | Artist, artwork and progress from Chrome or Safari | **Allow JavaScript from Apple Events**, a browser setting | You turn it on yourself: Chrome's **View > Developer** menu, or Safari's **Develop** menu |
 
-Detecting which app is playing, dictation and headphones need no permission at all.
+Detecting which app is playing, dictation and headphones need no permission at all. The mixer asks only after you move a slider, and only on macOS 14.4 or later.
 
 ## Connect Claude Code
 
@@ -305,6 +311,7 @@ flowchart LR
 - Chrome names each tab in its tab strip "Title" followed by status notes in any order, such as "– Audio playing" and "- Memory usage - 462 MB". The audible marker isn't always last.
 - Chrome holds its audio stream open about 15 seconds after a pause, so pause detection reads the tab strip instead.
 - Connecting headphones restores their saved volume, which reports a volume change. Device banners outrank the volume HUD so they aren't replaced.
+- Per-app volume installs a process tap only while a slider isn't at 100% or the app is muted. At 100% the tap is removed, so the app plays as it does without NotchBar. If the tap can't start, it is torn down and the app is left at its normal volume.
 - TCC permissions belong to the responsible process. Launch NotchBar with `open`, not from a terminal, when testing permissions.
 
 </details>
@@ -314,6 +321,7 @@ flowchart LR
 - **Stays on your Mac.** Everything NotchBar reads stays on your Mac. The only network request is weather, once you turn it on, and the location it sends is rounded to about a kilometre.
 - **No content.** NotchBar sees that an app uses the microphone, never what it hears.
 - **Camera.** The camera runs only while the camera glance is on screen. Nothing is recorded or saved.
+- **Mixer.** Turning an app down listens to that app so it can be played quieter. Nothing is recorded or stored, and an app at 100% isn't listened to.
 - **No secrets.** NotchBar never reads passwords, tokens or keychain items.
 - **Clipboard.** Concealed items and password managers are skipped.
 
@@ -419,6 +427,7 @@ Sources/NotchBar/
     Clipboard/  Clipboard history
     Timer/      Countdown timer
     HUD/        Volume, brightness, headphones, and the optional key takeover
+    Mixer/      Per-app volume. No taps until a slider moves off 100%
   Shared/     Small helpers: sleep-aware timer, file watcher, controls, formatting
 ```
 

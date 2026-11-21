@@ -42,8 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clipboardShortcut: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let volumes = AppVolumeMixer(systemAudio: hud.audio)
         let vm = NotchViewModel(media: media, usage: usage, timer: timer, hudService: hud, clipboard: clipboard, calendar: calendar,
-                                weather: weather, dictation: dictation, activity: activity)
+                                weather: weather, dictation: dictation, activity: activity, volumes: volumes)
         let controller = NotchController(vm: vm)
         self.controller = controller
         DebugCommands.install(vm: vm, panel: controller.panel, controller: controller)

@@ -23,7 +23,7 @@ enum NotchMenu {
         let organizer = MenuBarOrganizer.shared
         let menu = NSMenu()
         menu.autoenablesItems = false
-        menu.addItem(submenu("Show Tabs", items: NotchViewModel.Tab.allCases.map { tab in
+        menu.addItem(submenu("Show Tabs", items: NotchViewModel.Tab.offered.map { tab in
             Item(tab.title, checked: vm.isEnabled(tab), enabled: !(vm.isEnabled(tab) && vm.enabledTabs.count == 1)) {
                 vm.setEnabled(tab, !vm.isEnabled(tab))
             }

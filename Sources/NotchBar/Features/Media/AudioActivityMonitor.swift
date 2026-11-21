@@ -7,6 +7,13 @@ struct AudioApp: Equatable {
     let name: String
 }
 
+/// One playing app and the Core Audio process objects behind it, helpers included.
+/// Process taps take these object IDs, not PIDs.
+struct PlayingProcessGroup: Equatable {
+    var app: AudioApp
+    var processObjects: [AudioObjectID]
+}
+
 /// Knows which apps are making sound, and which are using the microphone, from CoreAudio's
 /// process list (macOS 14.4+).
 ///
@@ -28,6 +35,10 @@ final class AudioActivityMonitor {
     private(set) var recording: [AudioApp] = []
     var onChange: (() -> Void)?
     var onRecordingChange: (() -> Void)?
+    /// Extra listeners for the volume mixer. `onChange` stays a single callback so media
+    /// detection is left exactly as it is; this list is empty until the mixer tab is open.
+    private var playbackObservers: [UUID: () -> Void] = [:]
+    private var lastGroups: [PlayingProcessGroup] = []
     private var started = false
     private var watchedDevices: Set<AudioObjectID> = []
     private var inputFollowUps: [DispatchWorkItem] = []
@@ -151,9 +162,43 @@ final class AudioActivityMonitor {
         }
         // Keep the order things started in, so the newest player is last.
         let ordered = playing.filter(apps.contains) + apps.filter { !playing.contains($0) }
-        guard ordered != playing else { return }
-        playing = ordered
-        onChange?()
+        if ordered != playing {
+            playing = ordered
+            onChange?()
+        }
+        // The mixer also needs to know when a helper starts or stops inside an app that was
+        // already playing. That doesn't change `playing`, so media is not told again.
+        guard !playbackObservers.isEmpty else { return }
+        let groups = playingProcessGroups()
+        guard groups != lastGroups else { return }
+        lastGroups = groups
+        let observers = playbackObservers
+        observers.values.forEach { $0() }
+    }
+
+    /// Apps in `playing`, with the process objects that are actually sending sound.
+    /// Helpers are grouped under the main app by the same mapping as `playing`.
+    func playingProcessGroups() -> [PlayingProcessGroup] {
+        var objects: [String: [AudioObjectID]] = [:]
+        for process in watched where isRunning(process, &Self.isRunningOutputAddress) {
+            guard let app = owningApp(of: process), !Self.alwaysOpenApps.contains(app.bundleID) else { continue }
+            objects[app.bundleID, default: []].append(process)
+        }
+        return playing.compactMap { app in
+            guard let ids = objects[app.bundleID] else { return nil }
+            return PlayingProcessGroup(app: app, processObjects: ids.sorted())
+        }
+    }
+
+    func observePlayback(_ handler: @escaping () -> Void) -> UUID {
+        let id = UUID()
+        playbackObservers[id] = handler
+        return id
+    }
+
+    func removePlaybackObserver(_ id: UUID) {
+        playbackObservers.removeValue(forKey: id)
+        if playbackObservers.isEmpty { lastGroups = [] }
     }
 
     /// For the debug state: whether a microphone is on, whether NotchBar is checking, and every

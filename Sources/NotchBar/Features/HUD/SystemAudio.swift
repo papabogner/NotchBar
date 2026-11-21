@@ -9,6 +9,8 @@ final class SystemAudio {
     var onChange: ((Float, Bool) -> Void)?
     /// Called with the previous and the new output device.
     var onOutputChange: ((AudioOutput?, AudioOutput) -> Void)?
+    /// More listeners for the same change. Empty unless the volume mixer is actually adjusting apps.
+    private var outputHandlers: [UUID: (AudioOutput?, AudioOutput) -> Void] = [:]
     private var device = AudioDeviceID(0)
     private var listening: AudioDeviceID?
     private var output: AudioOutput?
@@ -51,7 +53,23 @@ final class SystemAudio {
         let current = AudioOutput(device: id)
         output = current
         // The first reading happens at launch, which isn't a change.
-        if let previous, previous.id != current.id { onOutputChange?(previous, current) }
+        if let previous, previous.id != current.id {
+            onOutputChange?(previous, current)
+            if !outputHandlers.isEmpty {
+                let handlers = outputHandlers
+                handlers.values.forEach { $0(previous, current) }
+            }
+        }
+    }
+
+    func addOutputHandler(_ handler: @escaping (AudioOutput?, AudioOutput) -> Void) -> UUID {
+        let id = UUID()
+        outputHandlers[id] = handler
+        return id
+    }
+
+    func removeOutputHandler(_ id: UUID) {
+        outputHandlers.removeValue(forKey: id)
     }
 
     private func emit() { onChange?(volume, isMuted) }

@@ -18,6 +18,7 @@
     <key>NSLocationUsageDescription</key><string>NotchBar uses your approximate location to show the local weather.</string>
     <key>NSLocationWhenInUseUsageDescription</key><string>NotchBar uses your approximate location to show the local weather.</string>
     <key>NSCameraUsageDescription</key><string>NotchBar shows your camera when you click the camera button, so you can check how you look. Nothing is recorded or saved.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>NotchBar adjusts the volume of individual apps. Audio isn't recorded or stored.</string>
     <key>NSAppleEventsUsageDescription</key><string>NotchBar reads what is playing in Music, Spotify, VLC and your browser, and sends play, pause and skip.</string>
 </dict>
 </plist>

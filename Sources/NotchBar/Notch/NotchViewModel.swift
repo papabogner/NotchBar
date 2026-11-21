@@ -6,13 +6,19 @@ import ApplicationServices
 @MainActor
 final class NotchViewModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case home, media, claude, timer, clipboard, calendar, activity
+        case home, media, claude, timer, clipboard, calendar, activity, mixer
         var id: String { rawValue }
         var title: String { rawValue == "claude" ? "Claude" : rawValue.capitalized }
 
         /// The tabs that existed before tab preferences were saved, so a tab added later
         /// shows up for everyone once instead of staying hidden by an old preference.
         static let original: [Tab] = [.home, .media, .claude, .timer, .clipboard, .calendar]
+
+        /// Mixer uses process taps, which need macOS 14.4. It isn't offered before that.
+        static var offered: [Tab] {
+            if #available(macOS 14.4, *) { return allCases }
+            return allCases.filter { $0 != .mixer }
+        }
     }
 
     /// A small drop-down below the closed notch, like a Live Activity.
@@ -74,6 +80,7 @@ final class NotchViewModel: ObservableObject {
     let weather: WeatherStore
     let dictation: DictationMonitor
     let activity: ActivityMonitor
+    let volumes: AppVolumeMixer
     let camera = CameraGlance()
 
     static let openSpring = Animation.spring(response: 0.42, dampingFraction: 0.76)
@@ -85,10 +92,11 @@ final class NotchViewModel: ObservableObject {
 
     init(media: MediaController, usage: ClaudeUsageStore, timer: TimerModel, hudService: HUDService,
          clipboard: ClipboardStore, calendar: CalendarStore, weather: WeatherStore, dictation: DictationMonitor,
-         activity: ActivityMonitor) {
+         activity: ActivityMonitor, volumes: AppVolumeMixer = AppVolumeMixer()) {
         self.weather = weather
         self.dictation = dictation
         self.activity = activity
+        self.volumes = volumes
         hideFromScreenshots = UserDefaults.standard.bool(forKey: "hideFromScreenshots")
         self.media = media
         self.usage = usage
@@ -126,6 +134,13 @@ final class NotchViewModel: ObservableObject {
                 self.camera.setActive(expanded && showsCamera)
             }
             .store(in: &bag)
+        // The mixer list follows playback only while its tab is showing. Moving a slider is what
+        // starts a tap; opening the tab does not.
+        Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
+            .sink { [weak self] expanded, tab, showsCamera in
+                self?.volumes.setVisible(expanded && tab == .mixer && !showsCamera)
+            }
+            .store(in: &bag)
         media.onNeedsAccessibility = { [weak self] app in
             self?.showToast("Allow NotchBar in Privacy & Security > Accessibility to control \(app).")
         }
@@ -146,14 +161,14 @@ final class NotchViewModel: ObservableObject {
     /// The saved tab choice, plus any tab that didn't exist when it was saved.
     private static func loadEnabledTabs() -> [Tab] {
         let defaults = UserDefaults.standard
-        defer { defaults.set(Tab.allCases.map(\.rawValue), forKey: "knownTabs") }
-        guard let saved = defaults.stringArray(forKey: "enabledTabs")?.compactMap(Tab.init(rawValue:)), !saved.isEmpty else {
-            return Tab.allCases
-        }
+        defer { defaults.set(Tab.offered.map(\.rawValue), forKey: "knownTabs") }
+        let decoded = defaults.stringArray(forKey: "enabledTabs")?.compactMap(Tab.init(rawValue:)) ?? []
+        let saved = decoded.filter { Tab.offered.contains($0) }
+        guard !saved.isEmpty else { return Tab.offered }
         let known = Set((defaults.stringArray(forKey: "knownTabs") ?? Tab.original.map(\.rawValue)).compactMap(Tab.init(rawValue:)))
-        let added = Tab.allCases.filter { !known.contains($0) }
+        let added = Tab.offered.filter { !known.contains($0) }
         guard !added.isEmpty else { return saved }
-        let tabs = Tab.allCases.filter { saved.contains($0) || added.contains($0) }
+        let tabs = Tab.offered.filter { saved.contains($0) || added.contains($0) }
         defaults.set(tabs.map(\.rawValue), forKey: "enabledTabs")
         return tabs
     }
@@ -194,7 +209,7 @@ final class NotchViewModel: ObservableObject {
         switch tab {
         case _ where showsCamera: content = 262
         case .home: content = 346
-        case .calendar, .activity: content = 222
+        case .calendar, .activity, .mixer: content = 222
         default: content = 150
         }
         // A toast gets its own strip below the content instead of covering it.
@@ -215,7 +230,7 @@ final class NotchViewModel: ObservableObject {
     /// Shows or hides a tab. At least one stays visible.
     func setEnabled(_ tab: Tab, _ enabled: Bool) {
         var tabs = enabledTabs
-        if enabled { tabs = Tab.allCases.filter { tabs.contains($0) || $0 == tab } } else { tabs.removeAll { $0 == tab } }
+        if enabled { tabs = Tab.offered.filter { tabs.contains($0) || $0 == tab } } else { tabs.removeAll { $0 == tab } }
         guard !tabs.isEmpty else { return }
         enabledTabs = tabs
         UserDefaults.standard.set(tabs.map(\.rawValue), forKey: "enabledTabs")

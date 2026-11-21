@@ -41,6 +41,7 @@ struct ExpandedNotch: View {
         case .clipboard: ClipboardPanel(store: vm.clipboard) { vm.copyClip($0, paste: $1) }
         case .calendar: CalendarPanel(calendar: vm.calendar)
         case .activity: ActivityPanel(monitor: vm.activity)
+        case .mixer: MixerPanel(mixer: vm.volumes)
         }
     }
 
@@ -134,6 +135,7 @@ struct ExpandedNotch: View {
         case .clipboard: Image(systemName: "doc.on.clipboard").font(.system(size: 10.5, weight: .semibold))
         case .calendar: Image(systemName: "calendar").font(.system(size: 11, weight: .semibold))
         case .activity: Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 11, weight: .semibold))
+        case .mixer: Image(systemName: "slider.horizontal.3").font(.system(size: 11, weight: .semibold))
         }
     }
 }
