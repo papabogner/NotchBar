@@ -45,6 +45,8 @@ final class AppVolumeMixer: ObservableObject {
     @Published private(set) var ducking = false
     @Published private(set) var duckBrowserMeet = false
     @Published private(set) var duckAppID: String?
+    /// Applies the saved level, mute, and output when that app plays, without waiting for a slider.
+    @Published private(set) var autoApply = false
     /// Extra bundles that count as the call, such as a browser tab on Meet. Set after init.
     var additionalCallBundles: @MainActor () -> Set<String> = { [] }
     private var duckGain: [String: Float] = [:]
@@ -81,6 +83,7 @@ final class AppVolumeMixer: ObservableObject {
     private static let duckKey = "mixerDucking"
     private static let duckMeetKey = "mixerDuckMeet"
     private static let duckAppKey = "mixerDuckApp"
+    private static let autoApplyKey = "appVolumeAutoApply"
     private static let callBundles: Set<String> = [
         "us.zoom.xos", "com.apple.FaceTime", "com.microsoft.teams", "com.microsoft.teams2", "com.cisco.webexmeetingsapp"
     ]
@@ -116,6 +119,7 @@ final class AppVolumeMixer: ObservableObject {
         ducking = UserDefaults.standard.bool(forKey: Self.duckKey)
         duckBrowserMeet = UserDefaults.standard.bool(forKey: Self.duckMeetKey)
         duckAppID = UserDefaults.standard.string(forKey: Self.duckAppKey)
+        autoApply = UserDefaults.standard.bool(forKey: Self.autoApplyKey)
     }
 
     func setDucking(_ on: Bool) {
@@ -146,6 +150,32 @@ final class AppVolumeMixer: ObservableObject {
         }
         refreshDuck()
         syncTaps()
+    }
+
+    /// When on, a saved level is applied as soon as that app plays.
+    func setAutoApply(_ on: Bool) {
+        guard !isPreview else { return }
+        autoApply = on
+        UserDefaults.standard.set(on, forKey: Self.autoApplyKey)
+        guard on else {
+            updateHooks()
+            syncTaps()
+            return
+        }
+        let wantsTap = saved.contains { $0.value.muted || $0.value.level != 100 }
+        if wantsTap && !explained {
+            needsExplanation = true
+            return
+        }
+        if wantsTap { engaged = true }
+        updateHooks()
+        syncTaps()
+    }
+
+    /// Applies remembered levels once this object exists, when that option is on.
+    func activateAutoApplyIfNeeded() {
+        guard autoApply, !isPreview else { return }
+        setAutoApply(true)
     }
 
     /// Starts listening for a call if ducking was left on. Called after init, not from it.
@@ -306,6 +336,9 @@ final class AppVolumeMixer: ObservableObject {
         explained = true
         needsExplanation = false
         UserDefaults.standard.set(true, forKey: Self.explainedKey)
+        if autoApply { engaged = true }
+        updateHooks()
+        syncTaps()
     }
 
     func declineExplanation() {
@@ -347,7 +380,9 @@ final class AppVolumeMixer: ObservableObject {
         if soloID != nil { return true }
         if !routes.isEmpty { return true }
         if !duckGain.isEmpty { return true }
-        return engaged && saved.contains { $0.value.muted || $0.value.level != 100 }
+        let savedWants = saved.contains { $0.value.muted || $0.value.level != 100 }
+        if autoApply && savedWants { return true }
+        return engaged && savedWants
     }
 
     private func syncTaps() {

@@ -89,6 +89,9 @@ enum NotchMenu {
                 Item(row.name, checked: vm.volumes.duckAppID == row.id) { vm.volumes.setDuckApp(row.id) }
             }
             menu.addItem(submenu("Duck When This App Plays", items: [Item("None", checked: vm.volumes.duckAppID == nil) { vm.volumes.setDuckApp(nil) }] + apps))
+            let rules = Item("Apply Saved Volumes", checked: vm.volumes.autoApply) { vm.volumes.setAutoApply(!vm.volumes.autoApply) }
+            rules.toolTip = "When an app starts playing, use the volume, mute, and output saved for it. Off: a saved level waits until you move that fader."
+            menu.addItem(rules)
         }
         menu.addItem(Item("Appearance…") {
             vm.showsAppearance = true

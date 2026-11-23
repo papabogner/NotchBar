@@ -138,6 +138,7 @@ final class NotchViewModel: ObservableObject {
             return [entry.source.bundleID]
         }
         mixer.activateDuckingIfNeeded()
+        mixer.activateAutoApplyIfNeeded()
 
         agents.onAlert = { [weak self] text in
             MainActor.assumeIsolated { self?.show(.agent(text)) }

@@ -124,6 +124,7 @@ Banners drop from the notch for a moment, then tuck back in.
 - **Keep Awake.** **… > Keep Awake** holds an idle-sleep assertion. A cup icon shows in the notch while it is on. The display can still dim.
 - **File Shelf.** Off until **… > File Shelf**. Drop files on the open notch to park them, click one to show it in Finder, or drag it back out.
 - **Ducking.** Off until **… > Duck Other Apps**. Zoom, Teams, FaceTime, Webex, an optional browser Meet tab, or one chosen app lowers everything else to a quarter, then restores it.
+- **Saved volumes.** **… > Apply Saved Volumes** puts an app back to its saved level, mute, and output when it starts playing. Off, a saved level still waits until you move that fader. An output chosen on a strip is remembered either way.
 
 </details>
 
