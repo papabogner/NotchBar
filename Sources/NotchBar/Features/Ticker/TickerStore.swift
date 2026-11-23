@@ -22,7 +22,14 @@ final class TickerStore: ObservableObject {
     @Published var isEnabled: Bool { didSet { persist(); reschedule() } }
     @Published var sources: Set<Source> { didSet { persist(); reschedule() } }
     @Published var width: Double { didSet { persist() } }
-    @Published var interval: Double { didSet { persist(); reschedule() } }
+    @Published var interval: Double {
+        didSet {
+            persist()
+            rotation?.stop()
+            rotation = nil
+            reschedule()
+        }
+    }
     @Published var customText: String { didSet { persist() } }
     @Published var feedURL: String { didSet { persist(); reschedule() } }
     @Published private(set) var feedLines: [String] = []

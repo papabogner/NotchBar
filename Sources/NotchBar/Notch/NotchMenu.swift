@@ -131,6 +131,11 @@ enum NotchMenu {
         menu.addItem(submenu("Ticker Sources", items: TickerStore.Source.allCases.map { source in
             Item(source.title, checked: ticker.sources.contains(source)) { ticker.toggle(source) }
         }))
+        menu.addItem(Item("Ticker Settings…") {
+            vm.showsAppearance = false
+            vm.showsTickerSettings = true
+            vm.open(.home)
+        })
     }
 
     private static func submenu(_ title: String, items: [NSMenuItem]) -> NSMenuItem {

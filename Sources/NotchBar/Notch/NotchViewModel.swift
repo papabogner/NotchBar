@@ -92,6 +92,7 @@ final class NotchViewModel: ObservableObject {
     let ticker: TickerStore
     let agents = AgentMonitor()
     @Published var showsAppearance = false
+    @Published var showsTickerSettings = false
     let camera = CameraGlance()
 
     static let openSpring = Animation.spring(response: 0.42, dampingFraction: 0.76)
@@ -323,6 +324,7 @@ final class NotchViewModel: ObservableObject {
             isExpanded = false
             showsCamera = false
             showsAppearance = false
+            showsTickerSettings = false
         }
     }
 
