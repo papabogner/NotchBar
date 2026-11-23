@@ -92,11 +92,11 @@ final class NotchViewModel: ObservableObject {
 
     init(media: MediaController, usage: ClaudeUsageStore, timer: TimerModel, hudService: HUDService,
          clipboard: ClipboardStore, calendar: CalendarStore, weather: WeatherStore, dictation: DictationMonitor,
-         activity: ActivityMonitor, volumes: AppVolumeMixer = AppVolumeMixer()) {
+         activity: ActivityMonitor, volumes: AppVolumeMixer? = nil) {
         self.weather = weather
         self.dictation = dictation
         self.activity = activity
-        self.volumes = volumes
+        self.volumes = volumes ?? AppVolumeMixer()
         hideFromScreenshots = UserDefaults.standard.bool(forKey: "hideFromScreenshots")
         self.media = media
         self.usage = usage

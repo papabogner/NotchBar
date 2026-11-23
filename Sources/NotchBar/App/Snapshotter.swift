@@ -128,9 +128,10 @@ enum Snapshotter {
         let clearBackground = ProcessInfo.processInfo.environment["NOTCHBAR_SNAPSHOT_CLEAR"] == "1"
         func render(_ name: String, media: MediaController = music, usage: ClaudeUsageStore = live, timer: TimerModel = idleTimer,
                     clipboard: ClipboardStore = clips, dictation: DictationMonitor? = nil,
-                    volumes: AppVolumeMixer = AppVolumeMixer(), configure: (NotchViewModel) -> Void = { _ in }) {
+                    volumes: AppVolumeMixer? = nil, configure: (NotchViewModel) -> Void = { _ in }) {
             let vm = NotchViewModel(media: media, usage: usage, timer: timer, hudService: HUDService(), clipboard: clipboard, calendar: calendar,
-                                    weather: weather, dictation: dictation ?? noDictation, activity: activity, volumes: volumes)
+                                    weather: weather, dictation: dictation ?? noDictation, activity: activity,
+                                    volumes: volumes ?? AppVolumeMixer())
             configure(vm)
             let view = ZStack(alignment: .top) {
                 // NOTCHBAR_SNAPSHOT_CLEAR=1 leaves out the wallpaper, for compositing (the launch video).

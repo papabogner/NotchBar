@@ -4,7 +4,7 @@ import Darwin
 import Foundation
 
 /// Why a process tap was not installed. The app is left playing normally in either case.
-enum TapStartError: Equatable {
+enum TapStartError: Error, Equatable {
     case permissionDenied
     case failed
 }

@@ -43,9 +43,11 @@ final class AppVolumeMixer: ObservableObject {
     private static let levelsKey = "appVolumeLevels"
     private static let explainedKey = "appVolumeExplained"
 
-    init(systemAudio: SystemAudio = SystemAudio(), activity: AudioActivityMonitor = .shared, preview: [AppVolumeRow]? = nil) {
-        self.systemAudio = systemAudio
-        self.activity = activity
+    init(systemAudio: SystemAudio? = nil, activity: AudioActivityMonitor? = nil, preview: [AppVolumeRow]? = nil) {
+        // Defaults are applied in the body. A default argument runs outside the main actor,
+        // so `SystemAudio()` and `AudioActivityMonitor.shared` cannot live in the signature.
+        self.systemAudio = systemAudio ?? SystemAudio()
+        self.activity = activity ?? AudioActivityMonitor.shared
         if let preview {
             rows = preview
             isPreview = true
