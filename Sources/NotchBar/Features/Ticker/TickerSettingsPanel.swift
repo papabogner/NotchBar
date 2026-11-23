@@ -4,6 +4,7 @@ import SwiftUI
 struct TickerSettingsPanel: View {
     @ObservedObject var ticker: TickerStore
     var close: () -> Void
+    @FocusState private var lineFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -23,6 +24,8 @@ struct TickerSettingsPanel: View {
             }
             TextField("Custom line", text: $ticker.customText)
                 .textFieldStyle(.roundedBorder)
+                .focused($lineFocused)
+                .onAppear { lineFocused = true }
             TextField("Feed URL (JSON or RSS)", text: $ticker.feedURL)
                 .textFieldStyle(.roundedBorder)
             Text("Crypto uses CoinGecko for BTC, ETH, SOL, and ADA in euros. A feed that fails is skipped.")

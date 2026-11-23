@@ -82,6 +82,18 @@ final class SpotifyConnect: ObservableObject {
         if on && isEnabled { refreshDevices() }
     }
 
+    /// Fills the Client ID from the clipboard when the field itself will not take a paste.
+    func pasteClientID() {
+        let raw = NSPasteboard.general.string(forType: .string) ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            status = "The clipboard has no text."
+            return
+        }
+        clientID = trimmed
+        status = ""
+    }
+
     func signOut() {
         accessToken = ""
         refreshToken = ""

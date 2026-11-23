@@ -5,6 +5,7 @@ struct MiniStatusPanel: View {
     @ObservedObject var mini: MiniStatus
     var close: () -> Void
     @State private var draft = ""
+    @FocusState private var hostFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -22,7 +23,11 @@ struct MiniStatusPanel: View {
                 .font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
             TextField("Host", text: $draft)
                 .textFieldStyle(.roundedBorder)
-                .onAppear { draft = mini.host }
+                .focused($hostFocused)
+                .onAppear {
+                    draft = mini.host
+                    hostFocused = true
+                }
             if mini.isEnabled {
                 Text(mini.report.online ? mini.line : "\(mini.host) is offline")
                     .font(.system(size: 12)).foregroundStyle(.white.opacity(0.7))

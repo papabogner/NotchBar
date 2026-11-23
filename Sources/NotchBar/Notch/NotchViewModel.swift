@@ -104,6 +104,9 @@ final class NotchViewModel: ObservableObject {
     @Published var showsTickerSettings = false
     @Published var showsSpotify = false
     @Published var showsMini = false
+
+    /// A settings sheet with a text field is open, so the notch must keep the keyboard.
+    var acceptsText: Bool { showsSpotify || showsMini || showsTickerSettings }
     let camera = CameraGlance()
 
     static let openSpring = Animation.spring(response: 0.42, dampingFraction: 0.76)

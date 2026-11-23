@@ -4,6 +4,7 @@ import SwiftUI
 struct SpotifyConnectPanel: View {
     @ObservedObject var spotify: SpotifyConnect
     var close: () -> Void
+    @FocusState private var clientFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -18,8 +19,15 @@ struct SpotifyConnectPanel: View {
             Text(SpotifyConnect.redirectURI)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .textSelection(.enabled)
-            TextField("Client ID", text: $spotify.clientID)
-                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 8) {
+                TextField("Client ID", text: $spotify.clientID)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($clientFocused)
+                Button("Paste from Clipboard") { spotify.pasteClientID() }
+                    .buttonStyle(PressableStyle(scale: 0.96))
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .onAppear { clientFocused = true }
             HStack(spacing: 8) {
                 Button(spotify.isSignedIn ? "Sign in again" : "Sign in") { spotify.signIn() }
                     .buttonStyle(PressableStyle(scale: 0.96))
