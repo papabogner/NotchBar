@@ -1,3 +1,5 @@
+import Foundation
+import Combine
 import IOKit.pwr_mgt
 
 /// Stops the Mac from idle-sleeping while the menu item is on. The display can still dim.
