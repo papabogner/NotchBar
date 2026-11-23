@@ -11,14 +11,67 @@ struct HomePanel: View {
     @ObservedObject var weather: WeatherStore
     @ObservedObject var volumes: AppVolumeMixer
 
+    private var combinedHome: Bool { volumes.combineOnHome && vm.isEnabled(.mixer) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            columns
-            if volumes.showsOnHome {
-                HomeMixerWidget(mixer: volumes) { vm.select(.mixer) }
+        Group {
+            if combinedHome {
+                combined
+            } else {
+                columns
             }
         }
-        .frame(height: 304 + (volumes.showsOnHome ? 136 : 0), alignment: .top)
+        .frame(height: 304, alignment: .top)
+    }
+
+    /// Now playing and the mixer strips in one row, then the rest of Home underneath.
+    /// The notch stays the same height as the classic Home.
+    private var combined: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                HomeMediaWidget(media: media) { vm.select(.media) }
+                    .frame(width: 236)
+                Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 100)
+                VStack(alignment: .leading, spacing: 4) {
+                    WidgetHeader(title: "Mixer", action: { vm.select(.mixer) }) {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    if volumes.needsApplyHint {
+                        Text("Drag a fader to apply.").font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.45))
+                    }
+                    MixerStripRow(mixer: volumes, highlight: media.nowPlaying?.source.bundleID, compact: true)
+                        .frame(height: volumes.needsApplyHint ? 72 : 86)
+                }
+            }
+            .frame(height: 118, alignment: .top)
+            lowerColumns
+        }
+    }
+
+    /// Calendar, weather, and the rest, without the now-playing block (that sits in the combined row).
+    private var lowerColumns: some View {
+        HStack(alignment: .top, spacing: 26) {
+            MonthGrid(calendar: calendar)
+                .frame(width: 252, alignment: .topLeading)
+            VStack(alignment: .leading, spacing: 18) {
+                HomeWeatherWidget(weather: weather)
+                upNext
+            }
+            .frame(width: 214, alignment: .topLeading)
+            restColumn
+        }
+        .frame(height: 174, alignment: .top)
+    }
+
+    private var restColumn: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HomeClaudeWidget(usage: usage) { vm.select(.claude) }
+            HomeTimerWidget(timer: timer) { vm.select(.timer) }
+            if vm.isEnabled(.activity) {
+                HomeActivityWidget(monitor: vm.activity) { vm.select(.activity) }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var columns: some View {
@@ -35,14 +88,7 @@ struct HomePanel: View {
             }
             .frame(width: 214, alignment: .topLeading)
 
-            VStack(alignment: .leading, spacing: 18) {
-                HomeClaudeWidget(usage: usage) { vm.select(.claude) }
-                HomeTimerWidget(timer: timer) { vm.select(.timer) }
-                if vm.isEnabled(.activity) {
-                    HomeActivityWidget(monitor: vm.activity) { vm.select(.activity) }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            restColumn
         }
         .frame(height: 304, alignment: .top)
     }

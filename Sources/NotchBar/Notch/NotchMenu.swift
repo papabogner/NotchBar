@@ -74,6 +74,14 @@ enum NotchMenu {
         menu.addItem(Item("Show Headphone Connections", checked: hud.showDevices) { hud.showDevices.toggle() })
         let dictation = vm.dictation
         menu.addItem(Item("Show Dictation (Handy and Others)", checked: dictation.isEnabled) { dictation.isEnabled.toggle() })
+        if NotchViewModel.Tab.offered.contains(.mixer) {
+            let combined = Item("Mixer on Home", checked: vm.volumes.combineOnHome) {
+                vm.volumes.combineOnHome.toggle()
+                vm.refreshMixerSurfaces()
+            }
+            combined.toolTip = "Shows now playing and the volume strips together. Turn off to restore the old Home."
+            menu.addItem(combined)
+        }
         let replace = Item(hud.waitingForAccess ? "Replace System HUD (waiting for Accessibility)" : "Replace System HUD",
                            checked: hud.replaceSystemHUD) {
             hud.setReplaceSystemHUD(!hud.replaceSystemHUD)

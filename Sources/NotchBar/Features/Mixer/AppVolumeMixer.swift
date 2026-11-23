@@ -1,8 +1,16 @@
 import AppKit
 
-/// One row in the mixer: a playing app and the level the user asked for.
+/// One strip in the mixer. `playing` is false for an app that has a Core Audio process but is idle.
 struct AppVolumeRow: Identifiable, Equatable {
     var id: String
+    var name: String
+    var level: Int
+    var muted: Bool
+    var playing: Bool
+}
+
+/// The system output fader. This is the device volume, not a process tap.
+struct MasterLevel: Equatable {
     var name: String
     var level: Int
     var muted: Bool
@@ -15,6 +23,14 @@ struct AppVolumeRow: Identifiable, Equatable {
 @MainActor
 final class AppVolumeMixer: ObservableObject {
     @Published private(set) var rows: [AppVolumeRow] = []
+    @Published private(set) var master = MasterLevel(name: "System", level: 100, muted: false)
+    /// When on, Home shows now playing and the mixer strips in one panel. Off restores the old Home.
+    @Published var combineOnHome: Bool {
+        didSet {
+            guard !isPreview else { return }
+            UserDefaults.standard.set(combineOnHome, forKey: Self.homeKey)
+        }
+    }
     @Published private(set) var needsExplanation = false
     @Published private(set) var permissionDenied = false
     @Published private(set) var statusMessage: String?
@@ -33,6 +49,7 @@ final class AppVolumeMixer: ObservableObject {
     private var homeVisible = false
     private var playbackToken: UUID?
     private var outputToken: UUID?
+    private var volumeToken: UUID?
     private var syncing = false
     /// Type-erased so the tap engine, which needs macOS 14.4, isn't stored on this class.
     private var engineBox: Any?
@@ -44,8 +61,10 @@ final class AppVolumeMixer: ObservableObject {
 
     private static let levelsKey = "appVolumeLevels"
     private static let explainedKey = "appVolumeExplained"
+    private static let homeKey = "homeMixerCombined"
 
-    init(systemAudio: SystemAudio? = nil, activity: AudioActivityMonitor? = nil, preview: [AppVolumeRow]? = nil) {
+    init(systemAudio: SystemAudio? = nil, activity: AudioActivityMonitor? = nil, preview: [AppVolumeRow]? = nil,
+         previewMaster: MasterLevel? = nil) {
         // Defaults are applied in the body. A default argument runs outside the main actor,
         // so `SystemAudio()` and `AudioActivityMonitor.shared` cannot live in the signature.
         // Locals, not the optional parameters: those names would shadow the stored properties.
@@ -53,15 +72,18 @@ final class AppVolumeMixer: ObservableObject {
         let monitor = activity ?? AudioActivityMonitor.shared
         self.systemAudio = audio
         self.activity = monitor
-        if let preview {
-            rows = preview
+        if let sample = preview {
+            rows = sample
             isPreview = true
             explained = true
+            combineOnHome = true
+            if let previewMaster { master = previewMaster }
             return
         }
         isPreview = false
         saved = Self.loadSaved()
         explained = UserDefaults.standard.bool(forKey: Self.explainedKey)
+        combineOnHome = UserDefaults.standard.object(forKey: Self.homeKey) as? Bool ?? true
     }
 
     /// For the debug state.
@@ -80,18 +102,33 @@ final class AppVolumeMixer: ObservableObject {
         !isPreview && !engaged && rows.contains { $0.level != 100 || $0.muted }
     }
 
-    /// Compact strips on Home. Empty until an app is playing and the Mixer tab is enabled.
-    var showsOnHome: Bool {
-        guard !rows.isEmpty else { return false }
-        return homeVisible || isPreview
-    }
+    /// Home is using the combined now-playing and mixer panel.
+    var showsCombinedHome: Bool { combineOnHome && (homeVisible || isPreview) }
 
     func setSurfaces(mixerTab: Bool, home: Bool) {
         guard !isPreview else { return }
         isVisible = mixerTab
         homeVisible = home
-        if mixerTab || home { publishRows() }
+        if mixerTab || home {
+            publishRows()
+            refreshMaster()
+        }
         updateHooks()
+    }
+
+    func setMasterLevel(_ level: Int) {
+        guard !isPreview else { return }
+        let clamped = min(100, max(0, level))
+        systemAudio.setVolume(Float(clamped) / 100)
+        master.level = clamped
+        if clamped > 0 { master.muted = false }
+    }
+
+    func toggleMasterMute() {
+        guard !isPreview else { return }
+        let next = !master.muted
+        systemAudio.setMuted(next)
+        master.muted = next
     }
 
     func setLevel(_ bundleID: String, _ level: Int) {
@@ -185,7 +222,7 @@ final class AppVolumeMixer: ObservableObject {
         } else if #available(macOS 14.4, *) {
             (engineBox as? Engine)?.stopAll()
         }
-        publishRows(groups)
+        publishRows()
     }
 
     private func rebind() {
@@ -198,7 +235,8 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     private func updateHooks() {
-        if isVisible || homeVisible || needsActiveTaps {
+        let watching = isVisible || homeVisible || needsActiveTaps
+        if watching {
             if playbackToken == nil {
                 playbackToken = activity.observePlayback { [weak self] in
                     MainActor.assumeIsolated { self?.playbackChanged() }
@@ -208,10 +246,21 @@ final class AppVolumeMixer: ObservableObject {
             activity.removePlaybackObserver(playbackToken)
             self.playbackToken = nil
         }
-        if needsActiveTaps {
+        // The master fader is on screen with the mixer tab or the combined Home panel.
+        if isVisible || homeVisible {
+            if volumeToken == nil {
+                volumeToken = systemAudio.addVolumeHandler { [weak self] _, _ in
+                    MainActor.assumeIsolated { self?.refreshMaster() }
+                }
+            }
+        } else if let volumeToken {
+            systemAudio.removeVolumeHandler(volumeToken)
+            self.volumeToken = nil
+        }
+        if watching {
             if outputToken == nil {
                 outputToken = systemAudio.addOutputHandler { [weak self] _, _ in
-                    MainActor.assumeIsolated { self?.rebind() }
+                    MainActor.assumeIsolated { self?.outputChanged() }
                 }
             }
         } else if let outputToken {
@@ -220,21 +269,42 @@ final class AppVolumeMixer: ObservableObject {
         }
     }
 
+    private func outputChanged() {
+        refreshMaster()
+        rebind()
+    }
+
+    private func refreshMaster() {
+        guard !isPreview else { return }
+        let level = min(100, max(0, Int((systemAudio.volume * 100).rounded())))
+        let next = MasterLevel(name: systemAudio.outputName, level: level, muted: systemAudio.isMuted)
+        if next != master { master = next }
+    }
+
     private func playbackChanged() {
         if needsActiveTaps { syncTaps() } else { publishRows() }
     }
 
     private func publishRows() {
-        publishRows(activity.mixerProcessGroups())
-    }
-
-    private func publishRows(_ groups: [PlayingProcessGroup]) {
         guard !isPreview else { return }
-        rows = groups.map { group in
-            let level = saved[group.app.bundleID]
-            return AppVolumeRow(id: group.app.bundleID, name: group.app.name,
-                                 level: level?.level ?? 100, muted: level?.muted ?? false)
+        var next = activity.capableAudioApps().map { item -> AppVolumeRow in
+            let level = saved[item.app.bundleID]
+            return AppVolumeRow(id: item.app.bundleID, name: item.app.name,
+                                 level: level?.level ?? 100, muted: level?.muted ?? false, playing: item.playing)
         }
+        var seen = Set(next.map(\.id))
+        for (id, level) in saved where !seen.contains(id) {
+            guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: id).first,
+                  running.activationPolicy == .regular else { continue }
+            next.append(AppVolumeRow(id: id, name: running.localizedName ?? id,
+                                      level: level.level, muted: level.muted, playing: false))
+            seen.insert(id)
+        }
+        next.sort { lhs, rhs in
+            if lhs.playing != rhs.playing { return lhs.playing && !rhs.playing }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        rows = next
         showSavedHint = isVisible && !engaged && rows.contains { $0.level != 100 || $0.muted }
     }
 

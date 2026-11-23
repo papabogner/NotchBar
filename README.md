@@ -90,7 +90,7 @@ Banners drop from the notch for a moment, then tuck back in.
 </td><td><img src="docs/screenshots/21-activity.png" alt="Activity tab with CPU and memory rings, network and disk rates, and the top processes"></td></tr>
 <tr><td colspan="2">
 
-**Mixer.** A fader and mute button for each app that's playing, on macOS 14.4 and later, on its own tab and as small strips on Home while something is playing. Drag one app down without changing the system volume. At 100% that app is left alone, and nothing is recorded or stored. Hide it from **… > Show Tabs**.
+**Mixer.** Faders for the system output and for each app that can play, on macOS 14.4 and later. Apps that are playing come first; idle ones are dimmed. Home shows now playing beside those strips, including a **System** master fader. **… > Mixer on Home** turns that combined panel off and restores the previous Home. At 100% an app is left alone, and nothing is recorded or stored. Hide the tab from **… > Show Tabs**.
 
 </td></tr>
 <tr><td>

@@ -139,12 +139,7 @@ final class NotchViewModel: ObservableObject {
         // Moving a slider is what starts a tap; opening the tab does not.
         mixer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
-            .sink { [weak self] expanded, tab, showsCamera in
-                guard let self else { return }
-                let mixerTab = expanded && tab == .mixer && !showsCamera
-                let home = expanded && tab == .home && !showsCamera && self.isEnabled(.mixer)
-                self.volumes.setSurfaces(mixerTab: mixerTab, home: home)
-            }
+            .sink { [weak self] _, _, _ in self?.refreshMixerSurfaces() }
             .store(in: &bag)
         media.onNeedsAccessibility = { [weak self] app in
             self?.showToast("Allow NotchBar in Privacy & Security > Accessibility to control \(app).")
@@ -213,7 +208,7 @@ final class NotchViewModel: ObservableObject {
         let content: CGFloat
         switch tab {
         case _ where showsCamera: content = 262
-        case .home: content = 346 + (volumes.showsOnHome ? 136 : 0)
+        case .home: content = 346
         case .calendar, .activity, .mixer: content = 222
         default: content = 150
         }
@@ -242,8 +237,14 @@ final class NotchViewModel: ObservableObject {
         clipboard.isEnabled = isEnabled(.clipboard)
         if !tabs.contains(self.tab) { self.tab = tabs[0] }
         activity.setActive(isExpanded && (self.tab == .activity || (self.tab == .home && isEnabled(.activity))))
-        volumes.setSurfaces(mixerTab: isExpanded && self.tab == .mixer && !showsCamera,
-                            home: isExpanded && self.tab == .home && !showsCamera && isEnabled(.mixer))
+        refreshMixerSurfaces()
+    }
+
+    /// The mixer list is live on its own tab, and on Home only while the combined panel is on.
+    func refreshMixerSurfaces() {
+        let mixerTab = isExpanded && tab == .mixer && !showsCamera
+        let home = isExpanded && tab == .home && !showsCamera && isEnabled(.mixer) && volumes.combineOnHome
+        volumes.setSurfaces(mixerTab: mixerTab, home: home)
     }
 
     /// The tab to open from the middle of the notch: Home, or the first visible tab.

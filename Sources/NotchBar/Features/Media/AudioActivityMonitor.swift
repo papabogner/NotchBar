@@ -15,6 +15,14 @@ struct PlayingProcessGroup: Equatable {
     var processObjects: [AudioObjectID]
 }
 
+/// An app that has a Core Audio process, whether or not it is currently playing.
+struct CapableAudioApp: Equatable {
+    var app: AudioApp
+    var playing: Bool
+    /// Process objects that are sending sound right now. Empty while the app is idle.
+    var outputObjects: [AudioObjectID]
+}
+
 /// Knows which apps are making sound, and which are using the microphone, from CoreAudio's
 /// process list (macOS 14.4+).
 ///
@@ -40,6 +48,7 @@ final class AudioActivityMonitor {
     /// detection is left exactly as it is; this list is empty until the mixer tab is open.
     private var playbackObservers: [UUID: () -> Void] = [:]
     private var lastGroups: [PlayingProcessGroup] = []
+    private var lastCapable: [CapableAudioApp] = []
     private var started = false
     private var watchedDevices: Set<AudioObjectID> = []
     private var inputFollowUps: [DispatchWorkItem] = []
@@ -171,8 +180,10 @@ final class AudioActivityMonitor {
         // already playing. That doesn't change `playing`, so media is not told again.
         guard !playbackObservers.isEmpty else { return }
         let groups = mixerProcessGroups()
-        guard groups != lastGroups else { return }
+        let capable = capableAudioApps()
+        guard groups != lastGroups || capable != lastCapable else { return }
         lastGroups = groups
+        lastCapable = capable
         let observers = playbackObservers
         observers.values.forEach { $0() }
     }
@@ -210,7 +221,33 @@ final class AudioActivityMonitor {
 
     func removePlaybackObserver(_ id: UUID) {
         playbackObservers.removeValue(forKey: id)
-        if playbackObservers.isEmpty { lastGroups = [] }
+        if playbackObservers.isEmpty {
+            lastGroups = []
+            lastCapable = []
+        }
+    }
+
+    /// Every regular app that owns a Core Audio process, playing or not.
+    /// Daemons that are not a Dock app are left out. Only called while the mixer is listening.
+    func capableAudioApps() -> [CapableAudioApp] {
+        var objects: [String: [AudioObjectID]] = [:]
+        var playingIDs = Set<String>()
+        var apps: [String: AudioApp] = [:]
+        for process in watched {
+            guard let app = mixerOwner(of: process), !Self.alwaysOpenApps.contains(app.bundleID) else { continue }
+            apps[app.bundleID] = app
+            if isRunning(process, &Self.isRunningOutputAddress) {
+                playingIDs.insert(app.bundleID)
+                objects[app.bundleID, default: []].append(process)
+            }
+        }
+        return apps.values.map { app in
+            CapableAudioApp(app: app, playing: playingIDs.contains(app.bundleID),
+                            outputObjects: (objects[app.bundleID] ?? []).sorted())
+        }.sorted { lhs, rhs in
+            if lhs.playing != rhs.playing { return lhs.playing && !rhs.playing }
+            return lhs.app.name.localizedCaseInsensitiveCompare(rhs.app.name) == .orderedAscending
+        }
     }
 
     /// For the debug state: whether a microphone is on, whether NotchBar is checking, and every

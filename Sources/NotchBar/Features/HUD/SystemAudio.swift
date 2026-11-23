@@ -11,6 +11,8 @@ final class SystemAudio {
     var onOutputChange: ((AudioOutput?, AudioOutput) -> Void)?
     /// More listeners for the same change. Empty unless the volume mixer is actually adjusting apps.
     private var outputHandlers: [UUID: (AudioOutput?, AudioOutput) -> Void] = [:]
+    /// Volume listeners besides the HUD. Empty unless the mixer strip is on screen.
+    private var volumeHandlers: [UUID: (Float, Bool) -> Void] = [:]
     private var device = AudioDeviceID(0)
     private var listening: AudioDeviceID?
     private var output: AudioOutput?
@@ -72,7 +74,27 @@ final class SystemAudio {
         outputHandlers.removeValue(forKey: id)
     }
 
-    private func emit() { onChange?(volume, isMuted) }
+    func addVolumeHandler(_ handler: @escaping (Float, Bool) -> Void) -> UUID {
+        let id = UUID()
+        volumeHandlers[id] = handler
+        return id
+    }
+
+    func removeVolumeHandler(_ id: UUID) {
+        volumeHandlers.removeValue(forKey: id)
+    }
+
+    /// Name of the current default output. "System" until the first device is known.
+    var outputName: String { output?.name ?? "System" }
+
+    private func emit() {
+        onChange?(volume, isMuted)
+        guard !volumeHandlers.isEmpty else { return }
+        let handlers = volumeHandlers
+        let value = volume
+        let muted = isMuted
+        handlers.values.forEach { $0(value, muted) }
+    }
 
     var volume: Float {
         var v = Float32(0)

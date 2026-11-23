@@ -192,12 +192,15 @@ enum Snapshotter {
         render("21-activity", configure: expanded(.activity))
         render("22-camera") { $0.isExpanded = true; $0.tab = .home; $0.toggleCamera() }
         let mixer = AppVolumeMixer(preview: [
-            AppVolumeRow(id: "com.apple.Music", name: "Music", level: 78, muted: false),
-            AppVolumeRow(id: "com.apple.Safari", name: "Safari", level: 40, muted: false),
-            AppVolumeRow(id: "com.apple.podcasts", name: "Podcasts", level: 100, muted: true),
-        ])
+            AppVolumeRow(id: "com.apple.Music", name: "Music", level: 78, muted: false, playing: true),
+            AppVolumeRow(id: "com.apple.Safari", name: "Safari", level: 40, muted: false, playing: true),
+            AppVolumeRow(id: "com.apple.podcasts", name: "Podcasts", level: 100, muted: true, playing: false),
+        ], previewMaster: MasterLevel(name: "Speakers", level: 64, muted: false))
         render("23-mixer", volumes: mixer, configure: expanded(.mixer))
         render("24-home-mixer", volumes: mixer, configure: expanded(.home))
+        let classic = AppVolumeMixer(preview: [])
+        classic.combineOnHome = false
+        render("00b-home-classic", volumes: classic, configure: expanded(.home))
     }
 
     private static func sampleArtwork() -> NSImage {
