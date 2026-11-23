@@ -41,6 +41,13 @@ final class AppVolumeMixer: ObservableObject {
     @Published private(set) var showSavedHint = false
     /// Option-click solo: every other app is silenced until solo is cleared.
     @Published private(set) var soloID: String?
+    /// While a call is playing, other apps are held down. Off until the menu turns it on.
+    @Published private(set) var ducking = false
+    @Published private(set) var duckBrowserMeet = false
+    @Published private(set) var duckAppID: String?
+    /// Extra bundles that count as the call, such as a browser tab on Meet. Set after init.
+    var additionalCallBundles: @MainActor () -> Set<String> = { [] }
+    private var duckGain: [String: Float] = [:]
 
     private let systemAudio: SystemAudio
     private let activity: AudioActivityMonitor
@@ -71,6 +78,12 @@ final class AppVolumeMixer: ObservableObject {
     private static let homeKey = "homeMixerCombined"
     private static let scenesKey = "mixerScenes"
     private static let routesKey = "appOutputRoutes"
+    private static let duckKey = "mixerDucking"
+    private static let duckMeetKey = "mixerDuckMeet"
+    private static let duckAppKey = "mixerDuckApp"
+    private static let callBundles: Set<String> = [
+        "us.zoom.xos", "com.apple.FaceTime", "com.microsoft.teams", "com.microsoft.teams2", "com.cisco.webexmeetingsapp"
+    ]
 
     private struct SceneSnapshot: Codable {
         var levels: [String: SavedLevel]
@@ -100,6 +113,47 @@ final class AppVolumeMixer: ObservableObject {
         routes = Self.loadRoutes()
         explained = UserDefaults.standard.bool(forKey: Self.explainedKey)
         combineOnHome = UserDefaults.standard.object(forKey: Self.homeKey) as? Bool ?? true
+        ducking = UserDefaults.standard.bool(forKey: Self.duckKey)
+        duckBrowserMeet = UserDefaults.standard.bool(forKey: Self.duckMeetKey)
+        duckAppID = UserDefaults.standard.string(forKey: Self.duckAppKey)
+    }
+
+    func setDucking(_ on: Bool) {
+        guard !isPreview else { return }
+        ducking = on
+        UserDefaults.standard.set(on, forKey: Self.duckKey)
+        if !on { duckGain = [:] }
+        updateHooks()
+        refreshDuck()
+        syncTaps()
+    }
+
+    func setDuckMeet(_ on: Bool) {
+        guard !isPreview else { return }
+        duckBrowserMeet = on
+        UserDefaults.standard.set(on, forKey: Self.duckMeetKey)
+        refreshDuck()
+        syncTaps()
+    }
+
+    func setDuckApp(_ bundleID: String?) {
+        guard !isPreview else { return }
+        duckAppID = bundleID
+        if let bundleID {
+            UserDefaults.standard.set(bundleID, forKey: Self.duckAppKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.duckAppKey)
+        }
+        refreshDuck()
+        syncTaps()
+    }
+
+    /// Starts listening for a call if ducking was left on. Called after init, not from it.
+    func activateDuckingIfNeeded() {
+        guard ducking, !isPreview else { return }
+        updateHooks()
+        refreshDuck()
+        syncTaps()
     }
 
     /// Applies a remembered per-app output once this object is fully initialized.
@@ -292,6 +346,7 @@ final class AppVolumeMixer: ObservableObject {
     private var needsActiveTaps: Bool {
         if soloID != nil { return true }
         if !routes.isEmpty { return true }
+        if !duckGain.isEmpty { return true }
         return engaged && saved.contains { $0.value.muted || $0.value.level != 100 }
     }
 
@@ -307,7 +362,7 @@ final class AppVolumeMixer: ObservableObject {
                 mixerLog.info("processes \(group.app.name, privacy: .public) \(self.activity.mixerProcessDetail(group.processObjects), privacy: .public)")
             }
             var gone: [String] = []
-            engine().sync(saved: saved, groups: groups, permissionDenied: permissionDenied, solo: soloID, routes: routes) { gone.append($0) }
+            engine().sync(saved: saved, groups: groups, permissionDenied: permissionDenied, solo: soloID, routes: routes, duck: duckGain) { gone.append($0) }
             if !gone.isEmpty {
                 for id in gone { routes.removeValue(forKey: id) }
                 persistRoutes()
@@ -330,7 +385,7 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     private func updateHooks() {
-        let watching = isVisible || homeVisible || needsActiveTaps
+        let watching = isVisible || homeVisible || needsActiveTaps || ducking
         if watching {
             if playbackToken == nil {
                 playbackToken = activity.observePlayback { [weak self] in
@@ -377,7 +432,31 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     private func playbackChanged() {
+        if ducking { refreshDuck() }
         if needsActiveTaps { syncTaps() } else { publishRows() }
+    }
+
+    /// Holds other playing apps at a quarter while a call, Meet, or the chosen app is playing.
+    private func refreshDuck() {
+        guard ducking, !isPreview else {
+            duckGain = [:]
+            return
+        }
+        let groups = activity.mixerProcessGroups()
+        var calls = Set(groups.map(\.app.bundleID).filter { Self.callBundles.contains($0) || $0 == duckAppID })
+        calls.formUnion(additionalCallBundles())
+        guard !calls.isEmpty else {
+            duckGain = [:]
+            return
+        }
+        var next: [String: Float] = [:]
+        for group in groups where !calls.contains(group.app.bundleID) {
+            let id = group.app.bundleID
+            let level = saved[id]
+            let base: Float = level?.muted == true ? 0 : Float(level?.level ?? 100) / 100
+            next[id] = min(base, 0.25)
+        }
+        duckGain = next
     }
 
     private func publishRows() {
@@ -511,11 +590,11 @@ final class AppVolumeMixer: ObservableObject {
         }
 
         func sync(saved: [String: SavedLevel], groups: [PlayingProcessGroup], permissionDenied: Bool, solo: String?,
-                  routes: [String: String], onDeviceGone: (String) -> Void) {
+                  routes: [String: String], duck: [String: Float], onDeviceGone: (String) -> Void) {
             var playing: [String: PlayingProcessGroup] = [:]
             for group in groups { playing[group.app.bundleID] = group }
             for id in Array(taps.keys) {
-                let keep = playing[id].map { wantsTap(id: id, level: saved[id], solo: solo, route: routes[id]) && !suppressed.contains(id) && taps[id]?.matches($0.processObjects, preferredUID: routes[id]) == true } ?? false
+                let keep = playing[id].map { wantsTap(id: id, level: saved[id], solo: solo, route: routes[id], duck: duck[id]) && !suppressed.contains(id) && taps[id]?.matches($0.processObjects, preferredUID: routes[id]) == true } ?? false
                 if !keep {
                     taps[id]?.stop()
                     taps.removeValue(forKey: id)
@@ -524,8 +603,8 @@ final class AppVolumeMixer: ObservableObject {
             guard !permissionDenied else { return }
             for group in groups {
                 let id = group.app.bundleID
-                guard wantsTap(id: id, level: saved[id], solo: solo, route: routes[id]), !suppressed.contains(id) else { continue }
-                let gain = gainValue(id: id, level: saved[id], solo: solo)
+                guard wantsTap(id: id, level: saved[id], solo: solo, route: routes[id], duck: duck[id]), !suppressed.contains(id) else { continue }
+                let gain = gainValue(id: id, level: saved[id], solo: solo, duck: duck[id])
                 if let existing = taps[id], existing.matches(group.processObjects, preferredUID: routes[id]) {
                     if existing.hasFault {
                         fail(id, permission: false, detail: "The audio callback failed.")
@@ -562,15 +641,17 @@ final class AppVolumeMixer: ObservableObject {
         func clearSuppression() { suppressed.removeAll() }
         func unsuppress(_ id: String) { suppressed.remove(id) }
 
-        private func wantsTap(id: String, level: SavedLevel?, solo: String?, route: String?) -> Bool {
+        private func wantsTap(id: String, level: SavedLevel?, solo: String?, route: String?, duck: Float?) -> Bool {
             if let solo, solo != id { return true }
+            if duck != nil { return true }
             if route != nil { return true }
             guard let level else { return false }
             return level.muted || level.level != 100
         }
 
-        private func gainValue(id: String, level: SavedLevel?, solo: String?) -> Float {
+        private func gainValue(id: String, level: SavedLevel?, solo: String?, duck: Float?) -> Float {
             if let solo, solo != id { return 0 }
+            if let duck { return min(1.5, max(0, duck)) }
             guard let level, !level.muted else { return 0 }
             return min(1.5, max(0, Float(level.level) / 100))
         }
