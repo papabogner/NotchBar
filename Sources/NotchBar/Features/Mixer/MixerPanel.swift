@@ -119,6 +119,8 @@ struct MixerStripRow: View {
 struct MasterStrip: View {
     @ObservedObject var mixer: AppVolumeMixer
     var compact: Bool
+    /// Home hides the device menu so the pill stays easy to grab.
+    var detailed: Bool = true
 
     var body: some View {
         VStack(spacing: 4) {
@@ -132,21 +134,28 @@ struct MasterStrip: View {
                 Image(systemName: mixer.master.muted ? "speaker.slash.fill" : "speaker.wave.3.fill")
                     .font(.system(size: compact ? 14 : 18, weight: .semibold))
             }
-            Menu {
-                ForEach(mixer.outputDevices()) { device in
-                    Button(device.name) { mixer.setSystemOutput(uid: device.uid) }
+            if detailed {
+                Menu {
+                    ForEach(mixer.outputDevices()) { device in
+                        Button(device.name) { mixer.setSystemOutput(uid: device.uid) }
+                    }
+                } label: {
+                    HStack(spacing: 2) {
+                        Text(mixer.master.name)
+                            .font(.system(size: 10, weight: .semibold))
+                            .lineLimit(2)
+                        Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                    }
+                    .frame(width: compact ? 56 : 68, height: 26, alignment: .top)
                 }
-            } label: {
-                HStack(spacing: 2) {
-                    Text(mixer.master.name)
-                        .font(.system(size: 10, weight: .semibold))
-                        .lineLimit(2)
-                    Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
-                }
-                .frame(width: compact ? 56 : 68, height: 26, alignment: .top)
+                .menuStyle(.borderlessButton)
+                .frame(width: compact ? 56 : 68)
+            } else {
+                Text("System")
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+                    .frame(width: compact ? 56 : 68)
             }
-            .menuStyle(.borderlessButton)
-            .frame(width: compact ? 56 : 68)
         }
         .padding(3)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(0.08)))
@@ -160,6 +169,7 @@ struct ChannelStrip: View {
     @ObservedObject var mixer: AppVolumeMixer
     var compact: Bool
     var highlighted: Bool
+    var detailed: Bool = true
     @State private var shimmer = false
 
     private var silenced: Bool { row.muted || (mixer.soloID != nil && mixer.soloID != row.id) }
@@ -182,8 +192,9 @@ struct ChannelStrip: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(1)
                 .frame(width: compact ? 56 : 68)
-            outputMenu
-                .frame(width: compact ? 56 : 68, height: 14)
+            if detailed {
+                outputMenu.frame(width: compact ? 56 : 68, height: 14)
+            }
         }
         .padding(2)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous)

@@ -88,11 +88,11 @@ enum NotchMenu {
                 vm.homeLayout.setEnabled(.mixer, !vm.homeLayout.isEnabled(.mixer))
                 vm.refreshMixerSurfaces()
             }
-            mixerCard.toolTip = "A slim System and now-playing fader on Home. The full mixer stays on hover and the Mixer tab."
+            mixerCard.toolTip = "Master and the apps that are playing, on Home. The Mixer tab has every app."
             menu.addItem(mixerCard)
             menu.addItem(Item("Open on Hover", checked: vm.openOnHover) { vm.openOnHover.toggle() })
             let mixerHover = Item("Mixer on Hover", checked: vm.mixerOnHover) { vm.mixerOnHover.toggle() }
-            mixerHover.toolTip = "Hovering the notch opens the Mixer. Click still opens whatever you tapped."
+            mixerHover.toolTip = "Off: hovering opens Home. On: hovering opens the Mixer. Click still follows what you tapped."
             menu.addItem(mixerHover)
         }
         let replace = Item(hud.waitingForAccess ? "Replace System HUD (waiting for Accessibility)" : "Replace System HUD",

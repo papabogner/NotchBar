@@ -20,7 +20,8 @@ final class HomeLayout: ObservableObject {
             }
         }
         /// The cards a new install shows. The rest stay available in Customize Home.
-        static let standard: [Card] = [.nowPlaying, .upNext, .weather, .claude]
+        /// Agents and Up Next stay in the list, and Home hides them until they have something to say.
+        static let standard: [Card] = [.nowPlaying, .mixer, .weather, .upNext, .agents]
     }
 
     struct Item: Identifiable, Equatable {
@@ -35,6 +36,8 @@ final class HomeLayout: ObservableObject {
     var writesChanges = true
 
     private static let key = "homeCards"
+    /// One-time: the compact mixer row joins Home. Turning it off afterwards stays off.
+    private static let migrationKey = "homeSmartLayout"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key),
@@ -49,6 +52,10 @@ final class HomeLayout: ObservableObject {
             }
         } else {
             items = Card.allCases.map { Item(card: $0, enabled: Card.standard.contains($0)) }
+        }
+        if !UserDefaults.standard.bool(forKey: Self.migrationKey) {
+            setEnabled(.mixer, true)
+            UserDefaults.standard.set(true, forKey: Self.migrationKey)
         }
     }
 

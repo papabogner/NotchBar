@@ -20,20 +20,155 @@ struct HomePanel: View {
                 cardGrid
             }
         }
-        .frame(height: 304, alignment: .top)
+        .frame(height: 330, alignment: .top)
     }
 
+    /// Now Playing leads, the live faders sit under it, and the rest only appears when it matters.
     private var cardGrid: some View {
-        let cards = layout.visible
-        let columns = [GridItem(.flexible(), spacing: 22), GridItem(.flexible(), spacing: 22)]
-        return ScrollView {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
-                ForEach(cards) { card in
-                    cardView(card).frame(maxWidth: .infinity, alignment: .topLeading)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if layout.isEnabled(.nowPlaying) { nowPlayingBlock }
+                if layout.isEnabled(.mixer), vm.isEnabled(.mixer) { homeMixer }
+                contextRow
+                if !detailCards.isEmpty {
+                    let columns = [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)]
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                        ForEach(detailCards) { card in
+                            cardView(card).frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                    }
                 }
             }
         }
         .scrollIndicators(.hidden)
+    }
+
+    private var detailCards: [HomeLayout.Card] {
+        layout.visible.filter { card in
+            switch card {
+            case .nowPlaying, .mixer, .weather, .upNext, .agents: return false
+            default: return true
+            }
+        }
+    }
+
+    @ViewBuilder private var nowPlayingBlock: some View {
+        if media.nowPlaying?.isPlaying == true {
+            HomeMediaWidget(media: media) { vm.select(.media) }
+        } else {
+            Button { vm.select(.media) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "play.circle").font(.system(size: 16, weight: .medium))
+                    Text("Not Playing").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                }
+                .foregroundStyle(.white.opacity(0.72))
+            }
+            .buttonStyle(PressableStyle(scale: 0.98))
+        }
+    }
+
+    private var homeMixer: some View {
+        let playing = volumes.rows.filter(\.playing).prefix(4)
+        let extra = volumes.rows.filter(\.playing).count - playing.count
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Playing").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.55))
+                Spacer()
+                Button { vm.select(.mixer) } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "slider.horizontal.3")
+                        Text(extra > 0 ? "More" : "Mixer")
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(PressableStyle(scale: 0.96))
+            }
+            HStack(alignment: .top, spacing: 8) {
+                MasterStrip(mixer: volumes, compact: true, detailed: false)
+                if playing.isEmpty {
+                    Text("Nothing playing").font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ForEach(Array(playing)) { row in
+                        ChannelStrip(row: row, mixer: volumes, compact: true, highlighted: row.id == media.nowPlaying?.source.bundleID, detailed: false)
+                    }
+                }
+            }
+            .frame(height: 148, alignment: .top)
+        }
+    }
+
+    private var contextRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            if layout.isEnabled(.weather) { weatherChip }
+            if layout.isEnabled(.upNext), let event = soonEvent { soonChip(event) }
+            if layout.isEnabled(.agents), !vm.agents.sessions.isEmpty { agentChip }
+            if layout.isEnabled(.timer), timer.isActive { timerChip }
+        }
+    }
+
+    private var soonEvent: CalendarEvent? {
+        guard calendar.access == .granted else { return nil }
+        let horizon = Date().addingTimeInterval(90 * 60)
+        return calendar.upcoming.first { event in
+            !event.isAllDay && event.end > Date() && event.start < horizon
+        }
+    }
+
+    private var weatherChip: some View {
+        Group {
+            if weather.access == .on, let report = weather.weather {
+                HStack(spacing: 6) {
+                    Image(systemName: report.symbol).symbolRenderingMode(.multicolor).font(.system(size: 14))
+                    Text("\(report.temperature)°").font(.system(size: 13, weight: .semibold, design: .rounded))
+                }
+            } else if weather.access == .off {
+                Button("Weather") { weather.turnOn() }
+                    .buttonStyle(PressableStyle(scale: 0.96))
+                    .font(.system(size: 12, weight: .semibold))
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(Capsule().fill(.white.opacity(0.08)))
+    }
+
+    private func soonChip(_ event: CalendarEvent) -> some View {
+        Button { vm.select(.calendar) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar").font(.system(size: 11, weight: .semibold))
+                Text(event.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            }
+        }
+        .buttonStyle(PressableStyle(scale: 0.96))
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(Capsule().fill(.white.opacity(0.08)))
+    }
+
+    private var agentChip: some View {
+        let session = vm.agents.sessions[0]
+        return HStack(spacing: 6) {
+            Circle().fill(session.state == .working ? Color.green : Color.orange).frame(width: 6, height: 6)
+            Text("\(session.tool) \(session.state.label)").font(.system(size: 12, weight: .semibold)).lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(Capsule().fill(.white.opacity(0.08)))
+    }
+
+    private var timerChip: some View {
+        Button { vm.select(.timer) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "timer").font(.system(size: 11, weight: .semibold))
+                Text("Timer").font(.system(size: 12, weight: .semibold))
+            }
+        }
+        .buttonStyle(PressableStyle(scale: 0.96))
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(Capsule().fill(.white.opacity(0.08)))
     }
 
     @ViewBuilder private func cardView(_ card: HomeLayout.Card) -> some View {

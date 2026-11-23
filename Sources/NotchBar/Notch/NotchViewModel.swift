@@ -112,7 +112,7 @@ final class NotchViewModel: ObservableObject {
         self.volumes = mixer
         hideFromScreenshots = UserDefaults.standard.bool(forKey: "hideFromScreenshots")
         openOnHover = UserDefaults.standard.object(forKey: "openOnHover") as? Bool ?? true
-        mixerOnHover = UserDefaults.standard.object(forKey: "mixerOnHover") as? Bool ?? true
+        mixerOnHover = UserDefaults.standard.object(forKey: "mixerOnHover") as? Bool ?? false
         self.media = media
         self.usage = usage
         self.timer = timer
@@ -176,7 +176,10 @@ final class NotchViewModel: ObservableObject {
         agents.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         updateAgentWatch()
         Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
-            .sink { [weak self] _, _, _ in self?.refreshMixerSurfaces() }
+            .sink { [weak self] _, _, _ in
+                self?.refreshMixerSurfaces()
+                self?.updateAgentWatch()
+            }
             .store(in: &bag)
         media.onNeedsAccessibility = { [weak self] app in
             self?.showToast("Allow NotchBar in Privacy & Security > Accessibility to control \(app).")
@@ -244,7 +247,7 @@ final class NotchViewModel: ObservableObject {
         let content: CGFloat
         switch tab {
         case _ where showsCamera: content = 262
-        case .home: content = 346
+        case .home: content = 372
         case .calendar, .activity: content = 222
         case .mixer: content = 300
         default: content = 150
@@ -281,7 +284,7 @@ final class NotchViewModel: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let wants = self.homeLayout.isEnabled(.agents)
+                let wants = (self.isExpanded && self.tab == .home && self.homeLayout.isEnabled(.agents))
                     || (self.ticker.isEnabled && self.ticker.sources.contains(.agents))
                 self.agents.setActive(wants)
             }
