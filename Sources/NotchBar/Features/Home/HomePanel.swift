@@ -9,8 +9,19 @@ struct HomePanel: View {
     @ObservedObject var timer: TimerModel
     @ObservedObject var calendar: CalendarStore
     @ObservedObject var weather: WeatherStore
+    @ObservedObject var volumes: AppVolumeMixer
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            columns
+            if volumes.showsOnHome {
+                HomeMixerWidget(mixer: volumes) { vm.select(.mixer) }
+            }
+        }
+        .frame(height: 304 + (volumes.showsOnHome ? 136 : 0), alignment: .top)
+    }
+
+    private var columns: some View {
         HStack(alignment: .top, spacing: 26) {
             VStack(alignment: .leading, spacing: 18) {
                 HomeMediaWidget(media: media) { vm.select(.media) }

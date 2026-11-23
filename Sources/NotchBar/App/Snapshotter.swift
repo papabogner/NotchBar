@@ -197,6 +197,7 @@ enum Snapshotter {
             AppVolumeRow(id: "com.apple.podcasts", name: "Podcasts", level: 100, muted: true),
         ])
         render("23-mixer", volumes: mixer, configure: expanded(.mixer))
+        render("24-home-mixer", volumes: mixer, configure: expanded(.home))
     }
 
     private static func sampleArtwork() -> NSImage {

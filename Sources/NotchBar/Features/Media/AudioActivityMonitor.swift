@@ -1,5 +1,6 @@
 import AppKit
 import CoreAudio
+import Darwin
 
 /// An app that is currently sending sound to an output device.
 struct AudioApp: Equatable {
@@ -169,25 +170,36 @@ final class AudioActivityMonitor {
         // The mixer also needs to know when a helper starts or stops inside an app that was
         // already playing. That doesn't change `playing`, so media is not told again.
         guard !playbackObservers.isEmpty else { return }
-        let groups = playingProcessGroups()
+        let groups = mixerProcessGroups()
         guard groups != lastGroups else { return }
         lastGroups = groups
         let observers = playbackObservers
         observers.values.forEach { $0() }
     }
 
-    /// Apps in `playing`, with the process objects that are actually sending sound.
-    /// Helpers are grouped under the main app by the same mapping as `playing`.
-    func playingProcessGroups() -> [PlayingProcessGroup] {
+    /// Apps sending sound, including helper processes whose own bundle ID is different.
+    /// `playing` itself is unchanged. This is only called while the mixer is listening.
+    func mixerProcessGroups() -> [PlayingProcessGroup] {
         var objects: [String: [AudioObjectID]] = [:]
+        var apps: [String: AudioApp] = [:]
         for process in watched where isRunning(process, &Self.isRunningOutputAddress) {
-            guard let app = owningApp(of: process), !Self.alwaysOpenApps.contains(app.bundleID) else { continue }
+            guard let app = mixerOwner(of: process), !Self.alwaysOpenApps.contains(app.bundleID) else { continue }
             objects[app.bundleID, default: []].append(process)
+            apps[app.bundleID] = app
         }
-        return playing.compactMap { app in
-            guard let ids = objects[app.bundleID] else { return nil }
+        let order = playing.map(\.bundleID).filter { apps[$0] != nil }
+            + apps.keys.filter { id in !playing.contains { $0.bundleID == id } }.sorted()
+        return order.compactMap { id in
+            guard let app = apps[id], let ids = objects[id] else { return nil }
             return PlayingProcessGroup(app: app, processObjects: ids.sorted())
         }
+    }
+
+    /// Object id, PID and bundle id for each tapped process. For the mixer log only.
+    func mixerProcessDetail(_ objects: [AudioObjectID]) -> String {
+        objects.map { process in
+            "obj=\(process) pid=\(processID(of: process)) bundle=\(bundleID(of: process) ?? "?")"
+        }.joined(separator: " | ")
     }
 
     func observePlayback(_ handler: @escaping () -> Void) -> UUID {
@@ -238,6 +250,50 @@ final class AudioActivityMonitor {
               id != Bundle.main.bundleIdentifier,
               !id.hasPrefix("com.apple.") || Self.mediaApps.contains(id) else { return nil }
         return AudioApp(bundleID: id, name: app.localizedName ?? id)
+    }
+
+    /// Like `owningApp`, then the parent process, then a bundle ID such as
+    /// `com.spotify.client.helper` matched to the running `com.spotify.client`.
+    /// Media detection does not use this, so helpers still don't show up as their own players.
+    private func mixerOwner(of process: AudioObjectID) -> AudioApp? {
+        if let app = owningApp(of: process) { return app }
+        let pid = processID(of: process)
+        guard pid > 0, pid != ownPID else { return nil }
+        var cursor = pid
+        var seen = Set<pid_t>()
+        for _ in 0..<6 {
+            guard seen.insert(cursor).inserted else { break }
+            if let owner = responsiblePID?(cursor), owner > 0, owner != cursor, let app = dockApp(pid: owner) {
+                return app
+            }
+            guard let parent = parentPID(of: cursor), parent > 1, parent != cursor else { break }
+            if let app = dockApp(pid: parent) { return app }
+            cursor = parent
+        }
+        guard let bundle = bundleID(of: process) else { return nil }
+        guard let match = NSWorkspace.shared.runningApplications.first(where: { running in
+            guard running.activationPolicy == .regular, let id = running.bundleIdentifier,
+                  id != Bundle.main.bundleIdentifier else { return false }
+            return bundle != id && bundle.hasPrefix(id + ".")
+        }), let id = match.bundleIdentifier else { return nil }
+        return AudioApp(bundleID: id, name: match.localizedName ?? id)
+    }
+
+    private func dockApp(pid: pid_t) -> AudioApp? {
+        guard let app = NSRunningApplication(processIdentifier: pid),
+              app.activationPolicy == .regular,
+              let id = app.bundleIdentifier,
+              id != Bundle.main.bundleIdentifier,
+              !id.hasPrefix("com.apple.") || Self.mediaApps.contains(id) else { return nil }
+        return AudioApp(bundleID: id, name: app.localizedName ?? id)
+    }
+
+    private func parentPID(of pid: pid_t) -> pid_t? {
+        var info = proc_bsdshortinfo()
+        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, size) == size else { return nil }
+        let parent = pid_t(info.pbsi_ppid)
+        return parent > 1 ? parent : nil
     }
 
     // MARK: CoreAudio

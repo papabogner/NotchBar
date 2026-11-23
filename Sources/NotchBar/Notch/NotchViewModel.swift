@@ -134,11 +134,15 @@ final class NotchViewModel: ObservableObject {
                 self.camera.setActive(expanded && showsCamera)
             }
             .store(in: &bag)
-        // The mixer list follows playback only while its tab is showing. Moving a slider is what
-        // starts a tap; opening the tab does not.
+        // The mixer list follows playback while its tab or the Home strips are showing.
+        // Moving a slider is what starts a tap; opening the tab does not.
+        volumes.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
             .sink { [weak self] expanded, tab, showsCamera in
-                self?.volumes.setVisible(expanded && tab == .mixer && !showsCamera)
+                guard let self else { return }
+                let mixerTab = expanded && tab == .mixer && !showsCamera
+                let home = expanded && tab == .home && !showsCamera && self.isEnabled(.mixer)
+                self.volumes.setSurfaces(mixerTab: mixerTab, home: home)
             }
             .store(in: &bag)
         media.onNeedsAccessibility = { [weak self] app in
@@ -208,7 +212,7 @@ final class NotchViewModel: ObservableObject {
         let content: CGFloat
         switch tab {
         case _ where showsCamera: content = 262
-        case .home: content = 346
+        case .home: content = 346 + (volumes.showsOnHome ? 136 : 0)
         case .calendar, .activity, .mixer: content = 222
         default: content = 150
         }
@@ -237,6 +241,8 @@ final class NotchViewModel: ObservableObject {
         clipboard.isEnabled = isEnabled(.clipboard)
         if !tabs.contains(self.tab) { self.tab = tabs[0] }
         activity.setActive(isExpanded && (self.tab == .activity || (self.tab == .home && isEnabled(.activity))))
+        volumes.setSurfaces(mixerTab: isExpanded && self.tab == .mixer && !showsCamera,
+                            home: isExpanded && self.tab == .home && !showsCamera && isEnabled(.mixer))
     }
 
     /// The tab to open from the middle of the notch: Home, or the first visible tab.

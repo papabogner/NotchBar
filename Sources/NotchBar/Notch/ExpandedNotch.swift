@@ -34,7 +34,7 @@ struct ExpandedNotch: View {
     @ViewBuilder private var tabContent: some View {
         switch vm.tab {
         case .home:
-            HomePanel(vm: vm, media: media, usage: usage, timer: timer, calendar: vm.calendar, weather: vm.weather)
+            HomePanel(vm: vm, media: media, usage: usage, timer: timer, calendar: vm.calendar, weather: vm.weather, volumes: vm.volumes)
         case .media: MediaPanel(media: media)
         case .claude: ClaudePanel(vm: vm, usage: usage)
         case .timer: TimerPanel(timer: timer)

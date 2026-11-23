@@ -2,11 +2,40 @@ import AudioToolbox
 import CoreAudio
 import Darwin
 import Foundation
+import os
+
+let mixerLog = Logger(subsystem: "com.local.notchbar", category: "mixer")
 
 /// Why a process tap was not installed. The app is left playing normally in either case.
 enum TapStartError: Error, Equatable {
-    case permissionDenied
-    case failed
+    case permissionDenied(OSStatus)
+    case failed(OSStatus, String)
+
+    var isPermission: Bool {
+        if case .permissionDenied = self { return true }
+        return false
+    }
+
+    /// Shown in the mixer and written to the unified log. Includes the OSStatus.
+    var summary: String {
+        switch self {
+        case .permissionDenied(let status):
+            return "System audio recording is off (\(Self.code(status))). Allow NotchBar in Privacy & Security > System Audio Recording, then move the slider again. Rebuilding asks again."
+        case .failed(let status, let stage):
+            return "\(stage) (\(Self.code(status)))."
+        }
+    }
+
+    static func code(_ status: OSStatus) -> String {
+        let value = UInt32(bitPattern: status)
+        let chars: [Character] = (0..<4).map { index in
+            let byte = UInt8((value >> ((3 - index) * 8)) & 0xff)
+            guard byte >= 32, byte < 127 else { return "." }
+            return Character(UnicodeScalar(byte))
+        }
+        let text = String(chars)
+        return text.allSatisfy({ $0 != "." }) ? "'\(text)' \(status)" : "\(status)"
+    }
 }
 
 /// Plays one app's output back through the current default device at a chosen gain.
@@ -17,9 +46,11 @@ enum TapStartError: Error, Equatable {
 @available(macOS 14.4, *)
 final class ProcessVolumeTap {
     let processObjects: [AudioObjectID]
+    let label: String
     let createdAt = Date()
     /// Set on the main thread by the health check. The render callback never reads it.
     var healthChecked = false
+    private var loggedGain: Float = -1
 
     private var context: UnsafeMutablePointer<TapContext>?
     private var aggregate: AudioObjectID = 0
@@ -27,9 +58,10 @@ final class ProcessVolumeTap {
     private var proc: AudioDeviceIOProcID?
     private var stopped = false
 
-    private init(processObjects: [AudioObjectID], context: UnsafeMutablePointer<TapContext>,
+    private init(processObjects: [AudioObjectID], label: String, context: UnsafeMutablePointer<TapContext>,
                  aggregate: AudioObjectID, tap: AudioObjectID, proc: AudioDeviceIOProcID?) {
         self.processObjects = processObjects
+        self.label = label
         self.context = context
         self.aggregate = aggregate
         self.tap = tap
@@ -49,6 +81,10 @@ final class ProcessVolumeTap {
         while true {
             let old = OSAtomicAdd32Barrier(0, ptr)
             if old == new || OSAtomicCompareAndSwap32Barrier(old, new, ptr) { return }
+        }
+        if abs(clamped - loggedGain) >= 0.01 {
+            loggedGain = clamped
+            mixerLog.info("gain \(self.label, privacy: .public) \(clamped, privacy: .public)")
         }
     }
 
@@ -81,10 +117,16 @@ final class ProcessVolumeTap {
     }
 
     /// Installs the tap and starts reading it. On any failure nothing is left running.
-    static func start(processObjects: [AudioObjectID], gain: Float) -> Result<ProcessVolumeTap, TapStartError> {
+    static func start(processObjects: [AudioObjectID], gain: Float, label: String) -> Result<ProcessVolumeTap, TapStartError> {
         let objects = processObjects.sorted()
-        guard !objects.isEmpty, let output = defaultOutputRoute() else { return .failure(.failed) }
+        guard !objects.isEmpty, let output = defaultOutputRoute() else {
+            let error = TapStartError.failed(0, "No default output")
+            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public) objects=\(objects.count, privacy: .public)")
+            return .failure(error)
+        }
 
+        // Process object IDs from kAudioHardwarePropertyProcessObjectList, not PIDs.
+        // A stereo mixdown of every object that belongs to the app, helpers included.
         let description = CATapDescription(stereoMixdownOfProcesses: objects)
         description.name = "NotchBar"
         description.isPrivate = true
@@ -94,7 +136,10 @@ final class ProcessVolumeTap {
         let created = AudioHardwareCreateProcessTap(description, &tapID)
         guard created == noErr, tapID != AudioObjectID(kAudioObjectUnknown) else {
             if tapID != AudioObjectID(kAudioObjectUnknown) { AudioHardwareDestroyProcessTap(tapID) }
-            return .failure(created == kAudioDevicePermissionsError ? .permissionDenied : .failed)
+            let error: TapStartError = created == kAudioDevicePermissionsError
+                ? .permissionDenied(created) : .failed(created, "Create process tap")
+            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public)")
+            return .failure(error)
         }
 
         let resources = TapResources()
@@ -103,26 +148,48 @@ final class ProcessVolumeTap {
         defer { resources.destroy() }
 
         let tapUID = readTapUID(tapID) ?? description.uuid.uuidString
-        guard !tapUID.isEmpty else { return .failure(.failed) }
+        guard !tapUID.isEmpty else {
+            let error = TapStartError.failed(0, "Tap has no UID")
+            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public)")
+            return .failure(error)
+        }
 
         // Drift compensation against a Bluetooth clock inserts and drops samples. Leave it off there.
         let drift = !output.bluetooth
         var aggregate = AudioObjectID(kAudioObjectUnknown)
+        var suppressedInput = true
         var status = AudioHardwareCreateAggregateDevice(aggregateDictionary(
             outputUID: output.uid, tapUID: tapUID, drift: drift, suppressHardwareInput: true) as CFDictionary, &aggregate)
         if status != noErr || aggregate == 0 {
             if aggregate != 0 { AudioHardwareDestroyAggregateDevice(aggregate) }
             aggregate = 0
+            suppressedInput = false
+            mixerLog.error("tap \(label, privacy: .public) aggregate without hardware input failed \(TapStartError.code(status), privacy: .public); retrying")
             status = AudioHardwareCreateAggregateDevice(aggregateDictionary(
                 outputUID: output.uid, tapUID: tapUID, drift: drift, suppressHardwareInput: false) as CFDictionary, &aggregate)
         }
-        guard status == noErr, aggregate != 0 else { return .failure(.failed) }
+        guard status == noErr, aggregate != 0 else {
+            let error = TapStartError.failed(status, "Create aggregate device")
+            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public)")
+            return .failure(error)
+        }
         resources.aggregate = aggregate
 
         guard let inputFormat = streamFormat(aggregate, scope: kAudioObjectPropertyScopeInput),
               let outputFormat = streamFormat(aggregate, scope: kAudioObjectPropertyScopeOutput),
               isFloat32(inputFormat), isFloat32(outputFormat),
-              inputFormat.mChannelsPerFrame > 0, outputFormat.mChannelsPerFrame > 0 else { return .failure(.failed) }
+              inputFormat.mChannelsPerFrame > 0, outputFormat.mChannelsPerFrame > 0 else {
+            let error = TapStartError.failed(kAudioDeviceUnsupportedFormatError, "Aggregate format is not float")
+            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public)")
+            return .failure(error)
+        }
+
+        // The hardware device's microphone, if the aggregate kept it, is the first input
+        // channels. The process tap is stereo and comes last. Reading channel 0 would play
+        // the mic (or silence) and the fader would never reach the app.
+        let tapChannels = 2
+        let totalInput = max(inputChannelCount(aggregate), Int(inputFormat.mChannelsPerFrame))
+        let tapOffset = totalInput > tapChannels ? totalInput - tapChannels : 0
 
         let context = UnsafeMutablePointer<TapContext>.allocate(capacity: 1)
         let clamped = min(1, max(0, gain))
@@ -136,23 +203,35 @@ final class ProcessVolumeTap {
             rendered: 0,
             current: clamped,
             step: step,
-            inputChannels: Int32(inputFormat.mChannelsPerFrame),
+            inputChannels: Int32(totalInput),
             outputChannels: Int32(outputFormat.mChannelsPerFrame),
             inputInterleaved: isInterleaved(inputFormat) ? 1 : 0,
-            outputInterleaved: isInterleaved(outputFormat) ? 1 : 0))
+            outputInterleaved: isInterleaved(outputFormat) ? 1 : 0,
+            tapChannelOffset: Int32(tapOffset),
+            tapChannelCount: Int32(tapChannels)))
         resources.context = context
 
         var proc: AudioDeviceIOProcID?
         let procStatus = AudioDeviceCreateIOProcID(aggregate, volumeTapIOProc, UnsafeMutableRawPointer(context), &proc)
-        guard procStatus == noErr, let proc else { return .failure(.failed) }
+        guard procStatus == noErr, let proc else {
+            let error = TapStartError.failed(procStatus, "Create IOProc")
+            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public)")
+            return .failure(error)
+        }
         resources.proc = proc
 
         // Reading starts here. `mutedWhenTapped` silences the app only from this point, and the
         // callback is already installed so the silenced audio is what we play back.
-        guard AudioDeviceStart(aggregate, proc) == noErr else { return .failure(.failed) }
+        let started = AudioDeviceStart(aggregate, proc)
+        guard started == noErr else {
+            let error = TapStartError.failed(started, "Start aggregate device")
+            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public)")
+            return .failure(error)
+        }
 
-        let tap = ProcessVolumeTap(processObjects: objects, context: context, aggregate: aggregate, tap: tapID, proc: proc)
+        let tap = ProcessVolumeTap(processObjects: objects, label: label, context: context, aggregate: aggregate, tap: tapID, proc: proc)
         resources.abandon()
+        mixerLog.info("tap started \(label, privacy: .public) gain=\(clamped, privacy: .public) output=\(output.uid, privacy: .public) objects=\(objects.map(String.init).joined(separator: ","), privacy: .public) inputChannels=\(totalInput, privacy: .public) tapOffset=\(tapOffset, privacy: .public) suppressedInput=\(suppressedInput, privacy: .public) drift=\(drift, privacy: .public)")
         return .success(tap)
     }
 }
@@ -171,6 +250,9 @@ private struct TapContext {
     var outputChannels: Int32
     var inputInterleaved: Int32
     var outputInterleaved: Int32
+    /// First input channel that belongs to the process tap. Hardware inputs, if any, come before it.
+    var tapChannelOffset: Int32
+    var tapChannelCount: Int32
 }
 
 private let targetOffset = MemoryLayout<TapContext>.offset(of: \TapContext.targetBits) ?? 0
@@ -182,6 +264,8 @@ private let inputChannelsOffset = MemoryLayout<TapContext>.offset(of: \TapContex
 private let outputChannelsOffset = MemoryLayout<TapContext>.offset(of: \TapContext.outputChannels) ?? 24
 private let inputInterleavedOffset = MemoryLayout<TapContext>.offset(of: \TapContext.inputInterleaved) ?? 28
 private let outputInterleavedOffset = MemoryLayout<TapContext>.offset(of: \TapContext.outputInterleaved) ?? 32
+private let tapChannelOffsetOffset = MemoryLayout<TapContext>.offset(of: \TapContext.tapChannelOffset) ?? 36
+private let tapChannelCountOffset = MemoryLayout<TapContext>.offset(of: \TapContext.tapChannelCount) ?? 40
 
 /// Owns half-built Core Audio objects so a failed start cannot leave a tap muting an app.
 @available(macOS 14.4, *)
@@ -240,14 +324,30 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
     let aliases = inList.count > 0 && outList.count > 0 && inList[0].mData == outList[0].mData
     if !aliases { silence(outList) }
 
-    if inChannels <= 0 || outChannels <= 0 || inList.count == 0 || outList.count == 0 { return false }
-    if (inInterleaved && inList.count < 1) || (!inInterleaved && inList.count < inChannels)
-        || (outInterleaved && outList.count < 1) || (!outInterleaved && outList.count < outChannels) {
+    let plannedTapOffset = Int(int32Field(context, tapChannelOffsetOffset).pointee)
+    let tapChannels = max(1, Int(int32Field(context, tapChannelCountOffset).pointee))
+    // Microphone channels, when the aggregate kept them, sit in front of the stereo tap.
+    // If the callback only has the tap's buffers, the offset is zero.
+    let sourceStride: Int
+    let sourceOffset: Int
+    if inInterleaved {
+        sourceStride = max(inChannels, tapChannels)
+        sourceOffset = inChannels > tapChannels ? plannedTapOffset : 0
+    } else if inList.count <= tapChannels {
+        sourceStride = inList.count
+        sourceOffset = 0
+    } else {
+        sourceStride = inList.count
+        sourceOffset = min(max(0, plannedTapOffset), inList.count - tapChannels)
+    }
+
+    if sourceStride <= 0 || outChannels <= 0 || inList.count == 0 || outList.count == 0 { return false }
+    if (outInterleaved && outList.count < 1) || (!outInterleaved && outList.count < min(outChannels, tapChannels)) {
         _ = OSAtomicCompareAndSwap32Barrier(0, 1, int32Field(context, faultOffset))
         return false
     }
 
-    let inFrames = frameCount(inList[0], channelsInBuffer: inInterleaved ? inChannels : 1)
+    let inFrames = frameCount(inList[inInterleaved ? 0 : sourceOffset], channelsInBuffer: inInterleaved ? sourceStride : 1)
     let outFrames = frameCount(outList[0], channelsInBuffer: outInterleaved ? outChannels : 1)
     if inFrames <= 0 || outFrames <= 0 { return false }
 
@@ -268,8 +368,9 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
         var channel = 0
         while channel < outChannels {
             let sample: Float
-            if frame < inFrames && channel < inChannels {
-                guard let read = readSample(inList, interleaved: inInterleaved, channels: inChannels, frame: frame, channel: channel) else {
+            let sourceChannel = sourceOffset + channel
+            if channel < tapChannels && frame < inFrames && sourceChannel < sourceStride {
+                guard let read = readSample(inList, interleaved: inInterleaved, channels: sourceStride, frame: frame, channel: sourceChannel) else {
                     gainSlot.pointee = gain
                     _ = OSAtomicCompareAndSwap32Barrier(0, 1, int32Field(context, faultOffset))
                     return false
@@ -421,6 +522,27 @@ private func aggregateDictionary(outputUID: String, tapUID: String, drift: Bool,
             kAudioSubTapDriftCompensationKey: drift,
         ]],
     ]
+}
+
+/// Every input channel on the aggregate, across streams. The main stream format hides the tap
+/// when a microphone stream is in front of it.
+private func inputChannelCount(_ device: AudioObjectID) -> Int {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyStreamConfiguration,
+        mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr, size > 0 else { return 0 }
+    let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+    defer { raw.deallocate() }
+    guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, raw) == noErr else { return 0 }
+    let buffers = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
+    var channels = 0
+    var index = 0
+    while index < buffers.count {
+        channels += Int(buffers[index].mNumberChannels)
+        index += 1
+    }
+    return channels
 }
 
 private func streamFormat(_ device: AudioObjectID, scope: AudioObjectPropertyScope) -> AudioStreamBasicDescription? {
