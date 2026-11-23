@@ -337,23 +337,35 @@ final class NotchViewModel: ObservableObject {
         refreshMixerSurfaces()
     }
 
+    /// Last applied watch state; setters publish changes, which call back here, so only apply on change.
+    private var lastWatchState: [Bool]?
+    private var watchUpdatePending = false
+
     private func updateAgentWatch() {
+        guard !watchUpdatePending else { return }
+        watchUpdatePending = true
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.watchUpdatePending = false
                 let wants = (self.isExpanded && self.tab == .home)
                     || (self.ticker.isEnabled && self.ticker.sources.contains(.agents))
-                self.agents.setActive(wants)
                 let miniHome = self.isExpanded && self.tab == .home && self.mini.isEnabled
                 let miniTicker = self.ticker.isEnabled && self.ticker.sources.contains(.mini) && self.mini.isEnabled
-                self.mini.setWatching(miniHome || miniTicker)
                 let bookHome = self.isExpanded && self.tab == .home && self.portfolio.isEnabled
                 let bookTicker = self.ticker.isEnabled && self.ticker.sources.contains(.portfolio) && self.portfolio.isEnabled
-                self.portfolio.setWatching(bookHome || bookTicker)
                 let tickerOn = self.ticker.isEnabled
-                self.macTicker.setActive(tickerOn && self.ticker.sources.contains(.thisMac))
-                self.newsTicker.setActive(news: tickerOn && self.ticker.sources.contains(.news),
-                                           x: tickerOn && self.ticker.sources.contains(.x))
+                let macOn = tickerOn && self.ticker.sources.contains(.thisMac)
+                let newsOn = tickerOn && self.ticker.sources.contains(.news)
+                let xOn = tickerOn && self.ticker.sources.contains(.x)
+                let state = [wants, miniHome || miniTicker, bookHome || bookTicker, macOn, newsOn, xOn]
+                guard state != self.lastWatchState else { return }
+                self.lastWatchState = state
+                self.agents.setActive(wants)
+                self.mini.setWatching(miniHome || miniTicker)
+                self.portfolio.setWatching(bookHome || bookTicker)
+                self.macTicker.setActive(macOn)
+                self.newsTicker.setActive(news: newsOn, x: xOn)
             }
         }
     }
