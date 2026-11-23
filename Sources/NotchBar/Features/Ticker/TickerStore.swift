@@ -45,6 +45,7 @@ final class TickerStore: ObservableObject {
     private var cryptoTimer: EfficientTimer?
     private var feedTimer: EfficientTimer?
     private var index = 0
+    private let spaceObserver = SpaceChangeObserver()
     private static let key = "tickerSettings"
 
     init(media: MediaController, calendar: CalendarStore, usage: ClaudeUsageStore) {
@@ -67,10 +68,10 @@ final class TickerStore: ObservableObject {
             customText = ""
             feedURL = ""
         }
-        let center = NSWorkspace.shared.notificationCenter
-        center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+        spaceObserver.onChange = { [weak self] in
             MainActor.assumeIsolated { self?.refreshMenuBar() }
         }
+        spaceObserver.start()
         refreshMenuBar()
         reschedule()
     }
@@ -107,7 +108,9 @@ final class TickerStore: ObservableObject {
     private func reschedule() {
         if isEnabled {
             if rotation == nil {
-                rotation = EfficientTimer(interval: max(3, interval), tolerance: 1) { [weak self] in self?.advance() }
+                rotation = EfficientTimer(interval: max(3, interval), tolerance: 1) { [weak self] in
+                    MainActor.assumeIsolated { self?.advance() }
+                }
             }
             rotation?.start()
         } else {
@@ -115,7 +118,9 @@ final class TickerStore: ObservableObject {
         }
         if isEnabled && sources.contains(.crypto) {
             if cryptoTimer == nil {
-                cryptoTimer = EfficientTimer(interval: 60, tolerance: 15) { [weak self] in self?.fetchCrypto() }
+                cryptoTimer = EfficientTimer(interval: 60, tolerance: 15) { [weak self] in
+                    MainActor.assumeIsolated { self?.fetchCrypto() }
+                }
             }
             cryptoTimer?.start()
             fetchCrypto()
@@ -124,7 +129,9 @@ final class TickerStore: ObservableObject {
         }
         if isEnabled && sources.contains(.feed), let url = URL(string: feedURL), url.scheme?.hasPrefix("http") == true {
             if feedTimer == nil {
-                feedTimer = EfficientTimer(interval: 15 * 60, tolerance: 60) { [weak self] in self?.fetchFeed() }
+                feedTimer = EfficientTimer(interval: 15 * 60, tolerance: 60) { [weak self] in
+                    MainActor.assumeIsolated { self?.fetchFeed() }
+                }
             }
             feedTimer?.start()
             fetchFeed()
@@ -146,28 +153,27 @@ final class TickerStore: ObservableObject {
 
     private func fetchCrypto() {
         guard let url = URL(string: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,cardano&vs_currencies=eur") else { return }
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Double]] else { return }
+        Task { @MainActor [weak self] in
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Double]] else { return }
             let pairs = [("bitcoin", "BTC"), ("ethereum", "ETH"), ("solana", "SOL"), ("cardano", "ADA")]
             let text = pairs.compactMap { id, symbol -> String? in
                 guard let price = json[id]?["eur"] else { return nil }
                 return "\(symbol) €\(Int(price.rounded()))"
             }.joined(separator: "  ")
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.cryptoLine = text }
-            }
-        }.resume()
+            guard let self, !text.isEmpty else { return }
+            self.cryptoLine = text
+        }
     }
 
     private func fetchFeed() {
         guard let url = URL(string: feedURL), url.scheme?.hasPrefix("http") == true else { return }
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let data else { return }
+        Task { @MainActor [weak self] in
+            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
             let lines = Self.parseFeed(data)
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { if !lines.isEmpty { self?.feedLines = lines } }
-            }
-        }.resume()
+            guard let self, !lines.isEmpty else { return }
+            self.feedLines = lines
+        }
     }
 
     private static func parseFeed(_ data: Data) -> [String] {
@@ -207,5 +213,20 @@ final class TickerStore: ObservableObject {
         var interval: Double
         var custom: String
         var feed: String
+    }
+}
+
+/// Selector observer so the workspace notification does not capture the store in a sendable block.
+private final class SpaceChangeObserver: NSObject {
+    var onChange: (() -> Void)?
+
+    func start() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(changed),
+            name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+    }
+
+    @objc private func changed() {
+        MainActor.assumeIsolated { onChange?() }
     }
 }

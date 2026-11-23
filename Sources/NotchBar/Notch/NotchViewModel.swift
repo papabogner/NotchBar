@@ -120,9 +120,18 @@ final class NotchViewModel: ObservableObject {
         self.clipboard = clipboard
         self.calendar = calendar
         ticker = TickerStore(media: media, calendar: calendar, usage: usage)
-        agents.onAlert = { [weak self] text in self?.show(.agent(text)) }
-        agents.onLine = { [weak self] line in self?.ticker.agentLine = line }
         enabledTabs = Self.loadEnabledTabs()
+        // Every stored property is set. Closures below may capture self.
+        clipboard.isEnabled = isEnabled(.clipboard)
+        if !enabledTabs.contains(tab) { tab = enabledTabs[0] }
+        mixer.applySavedRoutesIfNeeded()
+
+        agents.onAlert = { [weak self] text in
+            MainActor.assumeIsolated { self?.show(.agent(text)) }
+        }
+        agents.onLine = { [weak self] line in
+            MainActor.assumeIsolated { self?.ticker.agentLine = line }
+        }
 
         // The closed notch's width depends on the timer and on playback, so redraw with them.
         timer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
@@ -182,8 +191,6 @@ final class NotchViewModel: ObservableObject {
                 MainActor.assumeIsolated { self?.show(.nowPlaying) }
             }
             .store(in: &bag)
-        clipboard.isEnabled = isEnabled(.clipboard)
-        if !enabledTabs.contains(tab) { tab = enabledTabs[0] }
     }
 
     /// The saved tab choice, plus any tab that didn't exist when it was saved.

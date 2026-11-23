@@ -39,7 +39,9 @@ final class AgentMonitor: ObservableObject {
             MainActor.assumeIsolated { self?.refresh() }
         }
         watcher?.start()
-        timer = EfficientTimer(interval: 8, tolerance: 2) { [weak self] in self?.refresh() }
+        timer = EfficientTimer(interval: 8, tolerance: 2) { [weak self] in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
     }
 
     var summary: String {
@@ -61,16 +63,13 @@ final class AgentMonitor: ObservableObject {
         guard active else { return }
         let claude = Self.claudeProjects
         let codex = Self.codexSessions
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let tools = Self.runningTools()
-            let claudeState = Self.transcriptLabel(in: claude)
-            let codexState = Self.transcriptLabel(in: codex)
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    guard let self, self.active else { return }
-                    self.apply(tools: tools, claude: claudeState, codex: codexState)
-                }
-            }
+        // The scan stays off the main actor. This task does not capture self; the hop back does.
+        Task { @MainActor [weak self] in
+            let snapshot = await Task.detached {
+                (Self.runningTools(), Self.transcriptLabel(in: claude), Self.transcriptLabel(in: codex))
+            }.value
+            guard let self, self.active else { return }
+            self.apply(tools: snapshot.0, claude: snapshot.1, codex: snapshot.2)
         }
     }
 

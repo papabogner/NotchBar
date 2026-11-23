@@ -100,11 +100,14 @@ final class AppVolumeMixer: ObservableObject {
         routes = Self.loadRoutes()
         explained = UserDefaults.standard.bool(forKey: Self.explainedKey)
         combineOnHome = UserDefaults.standard.object(forKey: Self.homeKey) as? Bool ?? true
-        // A saved output has to be applied or the app keeps playing on the default device.
-        if !routes.isEmpty {
-            updateHooks()
-            syncTaps()
-        }
+    }
+
+    /// Applies a remembered per-app output once this object is fully initialized.
+    /// Called by the owner, not from `init`, because it installs closures that capture self.
+    func applySavedRoutesIfNeeded() {
+        guard !isPreview, !routes.isEmpty else { return }
+        updateHooks()
+        syncTaps()
     }
 
     /// For the debug state.
