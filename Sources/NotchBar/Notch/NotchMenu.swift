@@ -77,6 +77,19 @@ enum NotchMenu {
         let awake = Item("Keep Awake", checked: vm.awake.isOn) { vm.awake.toggle() }
         awake.toolTip = "Stops this Mac from idle-sleeping. The display can still dim. A cup shows in the notch while it is on."
         menu.addItem(awake)
+        let shelf = Item("File Shelf", checked: vm.shelf.isEnabled) { vm.shelf.setEnabled(!vm.shelf.isEnabled) }
+        shelf.toolTip = "Drop files on the open notch to park them, then drag them back out."
+        menu.addItem(shelf)
+        if NotchViewModel.Tab.offered.contains(.mixer) {
+            let duck = Item("Duck Other Apps", checked: vm.volumes.ducking) { vm.volumes.setDucking(!vm.volumes.ducking) }
+            duck.toolTip = "While Zoom, Teams, FaceTime, Webex, or the chosen app is playing, other apps drop to a quarter. They return when the call stops."
+            menu.addItem(duck)
+            menu.addItem(Item("Duck for Browser Meet", checked: vm.volumes.duckBrowserMeet) { vm.volumes.setDuckMeet(!vm.volumes.duckBrowserMeet) })
+            let apps = vm.volumes.rows.prefix(8).map { row in
+                Item(row.name, checked: vm.volumes.duckAppID == row.id) { vm.volumes.setDuckApp(row.id) }
+            }
+            menu.addItem(submenu("Duck When This App Plays", items: [Item("None", checked: vm.volumes.duckAppID == nil) { vm.volumes.setDuckApp(nil) }] + apps))
+        }
         menu.addItem(Item("Appearance…") {
             vm.showsAppearance = true
             vm.open(.home)

@@ -122,6 +122,8 @@ Banners drop from the notch for a moment, then tuck back in.
 - **Appearance.** **… > Appearance** picks Classic, Glass, Neon, Console, or a custom color and gradient. Album colors follow the artwork. The closed notch stays black.
 - **Global Hotkeys.** Off until **… > Global Hotkeys**. Then ⌃⌥N opens or closes the notch, ⌃⌥M mutes the system output, and ⌃⌥S recalls the next saved scene.
 - **Keep Awake.** **… > Keep Awake** holds an idle-sleep assertion. A cup icon shows in the notch while it is on. The display can still dim.
+- **File Shelf.** Off until **… > File Shelf**. Drop files on the open notch to park them, click one to show it in Finder, or drag it back out.
+- **Ducking.** Off until **… > Duck Other Apps**. Zoom, Teams, FaceTime, Webex, an optional browser Meet tab, or one chosen app lowers everything else to a quarter, then restores it.
 
 </details>
 

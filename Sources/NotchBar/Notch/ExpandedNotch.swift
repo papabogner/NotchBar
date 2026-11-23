@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The open notch: a tab bar on either side of the camera, and the selected tab below.
 struct ExpandedNotch: View {
@@ -7,6 +8,7 @@ struct ExpandedNotch: View {
     @ObservedObject var usage: ClaudeUsageStore
     @ObservedObject var timer: TimerModel
     @Namespace private var tabHighlight
+    @State private var shelfTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,8 +20,24 @@ struct ExpandedNotch: View {
             .padding(.horizontal, vm.topRadius + 16)
             .padding(.top, 12)
             .padding(.bottom, vm.toast == nil ? 18 : 48)
+            if vm.shelf.showsBar {
+                FileShelfBar(shelf: vm.shelf)
+                    .padding(.horizontal, vm.topRadius + 16)
+                    .padding(.bottom, vm.toast == nil ? 8 : 36)
+            }
         }
         .overlay(alignment: .bottom) { toast }
+        .overlay {
+            if shelfTargeted {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.white.opacity(0.7), lineWidth: 1.5)
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: [UTType.fileURL], isTargeted: $shelfTargeted) { providers in
+            vm.shelf.receive(providers)
+        }
         .foregroundStyle(.white)
     }
 

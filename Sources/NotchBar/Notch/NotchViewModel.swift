@@ -93,6 +93,7 @@ final class NotchViewModel: ObservableObject {
     let agents = AgentMonitor()
     let hotkeys = HotkeyController()
     let awake = AwakeKeeper()
+    let shelf = FileShelf()
     @Published var showsAppearance = false
     @Published var showsTickerSettings = false
     let camera = CameraGlance()
@@ -127,6 +128,16 @@ final class NotchViewModel: ObservableObject {
         clipboard.isEnabled = isEnabled(.clipboard)
         if !enabledTabs.contains(tab) { tab = enabledTabs[0] }
         mixer.applySavedRoutesIfNeeded()
+        mixer.additionalCallBundles = { [weak self] in
+            guard let self, self.volumes.duckBrowserMeet else { return [] }
+            guard let entry = self.media.nowPlaying, entry.isPlaying else { return [] }
+            let browsers = ["com.google.Chrome", "com.apple.Safari", "com.brave.Browser",
+                            "company.thebrowser.Browser", "com.microsoft.edgemac"]
+            guard browsers.contains(entry.source.bundleID),
+                  entry.title.localizedCaseInsensitiveContains("Meet") else { return [] }
+            return [entry.source.bundleID]
+        }
+        mixer.activateDuckingIfNeeded()
 
         agents.onAlert = { [weak self] text in
             MainActor.assumeIsolated { self?.show(.agent(text)) }
@@ -142,6 +153,8 @@ final class NotchViewModel: ObservableObject {
         hotkeys.onScene = { [weak self] in self?.volumes.cycleScene() }
         hotkeys.installIfNeeded()
         awake.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        shelf.bind()
+        shelf.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
 
         // The closed notch's width depends on the timer and on playback, so redraw with them.
         timer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
@@ -263,7 +276,8 @@ final class NotchViewModel: ObservableObject {
         default: content = 150
         }
         // A toast gets its own strip below the content instead of covering it.
-        return CGSize(width: 720, height: geometry.notchHeight + content + (toast == nil ? 0 : 30))
+        let shelfStrip: CGFloat = shelf.showsBar ? 34 : 0
+        return CGSize(width: 720, height: geometry.notchHeight + content + shelfStrip + (toast == nil ? 0 : 30))
     }
 
     var size: CGSize {
