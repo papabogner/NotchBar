@@ -42,7 +42,9 @@ struct ExpandedNotch: View {
     }
 
     @ViewBuilder private var content: some View {
-        if vm.showsTickerSettings {
+        if vm.showsSpotify {
+            SpotifyConnectPanel(spotify: vm.spotify) { vm.showsSpotify = false }
+        } else if vm.showsTickerSettings {
             TickerSettingsPanel(ticker: vm.ticker) { vm.showsTickerSettings = false }
         } else if vm.showsAppearance {
             AppearancePanel(appearance: vm.appearance) { vm.showsAppearance = false }
@@ -64,7 +66,7 @@ struct ExpandedNotch: View {
         case .clipboard: ClipboardPanel(store: vm.clipboard) { vm.copyClip($0, paste: $1) }
         case .calendar: CalendarPanel(calendar: vm.calendar)
         case .activity: ActivityPanel(monitor: vm.activity)
-        case .mixer: MixerPanel(mixer: vm.volumes, highlight: media.nowPlaying?.source.bundleID)
+        case .mixer: MixerPanel(mixer: vm.volumes, highlight: media.nowPlaying?.source.bundleID, spotify: vm.spotify)
         }
     }
 

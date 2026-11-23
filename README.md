@@ -125,6 +125,7 @@ Banners drop from the notch for a moment, then tuck back in.
 - **File Shelf.** Off until **… > File Shelf**. Drop files on the open notch to park them, click one to show it in Finder, or drag it back out.
 - **Ducking.** Off until **… > Duck Other Apps**. Zoom, Teams, FaceTime, Webex, an optional browser Meet tab, or one chosen app lowers everything else to a quarter, then restores it.
 - **Saved volumes.** **… > Apply Saved Volumes** puts an app back to its saved level, mute, and output when it starts playing. Off, a saved level still waits until you move that fader. An output chosen on a strip is remembered either way.
+- **Spotify Connect.** Off until **… > Spotify Connect**. Setup is in [Spotify Connect](#spotify-connect).
 
 </details>
 
@@ -199,6 +200,23 @@ Nothing is asked for at launch. Each permission comes up the first time you use 
 | Artist, artwork and progress from Chrome or Safari | **Allow JavaScript from Apple Events**, a browser setting | You turn it on yourself: Chrome's **View > Developer** menu, or Safari's **Develop** menu |
 
 Detecting which app is playing, dictation and headphones need no permission at all. The mixer asks only after you move a slider, and only on macOS 14.4 or later.
+
+## Spotify Connect
+
+Off until **… > Spotify Connect**. NotchBar then lists the devices on your Spotify account, on the Spotify fader and under Now Playing. Tap one to move playback there. If the active device is a speaker or a phone rather than this Mac, a small volume slider controls that device.
+
+Spotify needs a free app that you create. There is no shared client secret.
+
+1. Open [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) and create an app.
+2. Edit its settings and add this redirect URI exactly:
+
+   `http://127.0.0.1:47321/callback`
+
+3. Copy the Client ID.
+4. In the notch, choose **… > Spotify Connect…**, paste the Client ID, and click **Sign in**.
+5. Turn on **… > Spotify Connect**.
+
+Sign-in uses Authorization Code with PKCE. The browser comes back to NotchBar on `127.0.0.1` port `47321`, and the tokens are stored in the Keychain. A 403 from Spotify, which is what a free account gets for Connect, shows “Spotify Connect needs a Premium account.”
 
 ## Connect Claude Code
 

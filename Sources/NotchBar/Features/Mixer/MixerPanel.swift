@@ -4,6 +4,7 @@ import SwiftUI
 struct MixerPanel: View {
     @ObservedObject var mixer: AppVolumeMixer
     var highlight: String?
+    var spotify: SpotifyConnect? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -108,7 +109,7 @@ struct MixerStripRow: View {
                 MasterStrip(mixer: mixer, compact: compact)
                 Rectangle().fill(.white.opacity(0.14)).frame(width: 1).padding(.vertical, 6)
                 ForEach(mixer.rows) { row in
-                    ChannelStrip(row: row, mixer: mixer, compact: compact, highlighted: row.id == highlight)
+                    ChannelStrip(row: row, mixer: mixer, compact: compact, highlighted: row.id == highlight, spotify: spotify)
                 }
             }
         }
@@ -170,6 +171,7 @@ struct ChannelStrip: View {
     var compact: Bool
     var highlighted: Bool
     var detailed: Bool = true
+    var spotify: SpotifyConnect? = nil
     @State private var shimmer = false
 
     private var silenced: Bool { row.muted || (mixer.soloID != nil && mixer.soloID != row.id) }
@@ -194,6 +196,10 @@ struct ChannelStrip: View {
                 .frame(width: compact ? 56 : 68)
             if detailed {
                 outputMenu.frame(width: compact ? 56 : 68, height: 14)
+            }
+            if row.id == SpotifyConnect.spotifyBundle, let spotify, spotify.isEnabled {
+                SpotifyDeviceMenu(spotify: spotify)
+                    .frame(width: compact ? 64 : 76)
             }
         }
         .padding(2)

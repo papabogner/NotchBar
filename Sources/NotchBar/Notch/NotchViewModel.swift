@@ -94,8 +94,10 @@ final class NotchViewModel: ObservableObject {
     let hotkeys = HotkeyController()
     let awake = AwakeKeeper()
     let shelf = FileShelf()
+    let spotify = SpotifyConnect()
     @Published var showsAppearance = false
     @Published var showsTickerSettings = false
+    @Published var showsSpotify = false
     let camera = CameraGlance()
 
     static let openSpring = Animation.spring(response: 0.42, dampingFraction: 0.76)
@@ -156,6 +158,7 @@ final class NotchViewModel: ObservableObject {
         awake.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         shelf.bind()
         shelf.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        spotify.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
 
         // The closed notch's width depends on the timer and on playback, so redraw with them.
         timer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
@@ -203,6 +206,7 @@ final class NotchViewModel: ObservableObject {
             .sink { [weak self] _, _, _ in
                 self?.refreshMixerSurfaces()
                 self?.updateAgentWatch()
+                self?.spotify.setWatching(self?.isExpanded == true && self?.spotify.isEnabled == true)
             }
             .store(in: &bag)
         media.onNeedsAccessibility = { [weak self] app in
@@ -360,6 +364,7 @@ final class NotchViewModel: ObservableObject {
             showsCamera = false
             showsAppearance = false
             showsTickerSettings = false
+            showsSpotify = false
         }
     }
 

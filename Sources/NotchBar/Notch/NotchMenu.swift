@@ -80,6 +80,22 @@ enum NotchMenu {
         let shelf = Item("File Shelf", checked: vm.shelf.isEnabled) { vm.shelf.setEnabled(!vm.shelf.isEnabled) }
         shelf.toolTip = "Drop files on the open notch to park them, then drag them back out."
         menu.addItem(shelf)
+        let connect = Item("Spotify Connect", checked: vm.spotify.isEnabled) {
+            let turningOn = !vm.spotify.isEnabled
+            vm.spotify.setEnabled(turningOn)
+            if turningOn && (vm.spotify.clientID.isEmpty || !vm.spotify.isSignedIn) {
+                vm.showsSpotify = true
+                vm.open(.home)
+            }
+        }
+        connect.toolTip = "Lists Spotify Connect devices on the Spotify strip and Now Playing. Off until you turn it on."
+        menu.addItem(connect)
+        menu.addItem(Item("Spotify Connect…") {
+            vm.showsAppearance = false
+            vm.showsTickerSettings = false
+            vm.showsSpotify = true
+            vm.open(.home)
+        })
         if NotchViewModel.Tab.offered.contains(.mixer) {
             let duck = Item("Duck Other Apps", checked: vm.volumes.ducking) { vm.volumes.setDucking(!vm.volumes.ducking) }
             duck.toolTip = "While Zoom, Teams, FaceTime, Webex, or the chosen app is playing, other apps drop to a quarter. They return when the call stops."

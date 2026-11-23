@@ -70,6 +70,9 @@ struct HomePanel: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            if vm.spotify.isEnabled, entry?.source.bundleID == SpotifyConnect.spotifyBundle {
+                SpotifyDeviceMenu(spotify: vm.spotify)
+            }
         }
     }
 
@@ -99,7 +102,7 @@ struct HomePanel: View {
                 ForEach(strips) { row in
                     slot {
                         ChannelStrip(row: row, mixer: volumes, compact: true,
-                                     highlighted: row.id == entry?.source.bundleID, detailed: false)
+                                     highlighted: row.id == entry?.source.bundleID, detailed: false, spotify: vm.spotify)
                     }
                 }
             }
