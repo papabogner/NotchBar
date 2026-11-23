@@ -4,7 +4,7 @@ import AppKit
 @MainActor
 final class HomeLayout: ObservableObject {
     enum Card: String, CaseIterable, Identifiable, Codable {
-        case nowPlaying, upNext, weather, claude, timer, activity, calendar, mixer
+        case nowPlaying, upNext, weather, claude, timer, activity, calendar, mixer, agents
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -16,6 +16,7 @@ final class HomeLayout: ObservableObject {
             case .activity: return "Activity"
             case .calendar: return "Calendar"
             case .mixer: return "Mixer"
+            case .agents: return "Agents"
             }
         }
         /// The cards a new install shows. The rest stay available in Customize Home.

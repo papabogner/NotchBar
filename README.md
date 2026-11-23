@@ -90,7 +90,11 @@ Banners drop from the notch for a moment, then tuck back in.
 </td><td><img src="docs/screenshots/21-activity.png" alt="Activity tab with CPU and memory rings, network and disk rates, and the top processes"></td></tr>
 <tr><td colspan="2">
 
-**Mixer.** Faders for the system output and for each app that can play, on macOS 14.4 and later. Apps that are playing come first; idle ones are dimmed. Home shows now playing beside those strips, including a **System** master fader. **… > Mixer on Home** turns that combined panel off and restores the previous Home. At 100% an app is left alone, and nothing is recorded or stored. Hide the tab from **… > Show Tabs**.
+**Mixer.** Faders for the system output and for each app that can play, on macOS 14.4 and later. Apps that are playing come first; idle ones are dimmed. The chevron under a strip picks an output, including AirPlay devices macOS is exposing. The master chevron changes the system output. A chosen device is remembered per app, and that app is tapped even at 100% so the sound can go there. If the device disappears, the app falls back to the default. At 100% with no custom output an app is left alone, and nothing is recorded or stored. Hide the tab from **… > Show Tabs**.
+
+**Home.** A few cards: Now Playing, Up Next, Weather, and Claude. **… > Customize Home** turns the others on (Calendar, Timer, Activity, a slim Mixer summary, Agents) and reorders them.
+
+**Ticker.** **… > Show Ticker** is off until you turn it on. It then rotates now playing, the next event, Claude, agents, a line you type, a feed URL, or crypto prices beside the closed notch, and hides in fullscreen.
 
 </td></tr>
 <tr><td>
@@ -203,6 +207,29 @@ NotchBar works with Claude Code out of the box. It estimates your usage from the
 
 Connecting adds two small scripts to `~/.claude/settings.json`, and saves a backup of the file first. **… > Disconnect Claude Code** removes everything it added.
 
+## Agent status
+
+Turn on the **Agents** card in Customize Home, or the **Agents** ticker source, and NotchBar watches Claude Code and Codex. A running `claude` or `codex` process, or a transcript written in the last couple of minutes, shows as working or done. A status file is more precise: it can say the agent is waiting for you. When that changes to done or needs you, the notch plays a short chime and shows a brief banner.
+
+Status files live in `~/Library/Application Support/NotchBar/agents/`. Any `*.json` file is read:
+
+```json
+{"id":"session-1","tool":"Claude","state":"waiting","title":"Needs your OK"}
+```
+
+`state` is `working`, `waiting`, or `done`. A Claude Code hook can write one. Add this to `~/.claude/settings.json` (merge it with the hooks you already have):
+
+```json
+{
+  "hooks": {
+    "Notification": [{ "hooks": [{ "type": "command", "command": "mkdir -p \"$HOME/Library/Application Support/NotchBar/agents\" && printf '%s' '{\"id\":\"claude\",\"tool\":\"Claude\",\"state\":\"waiting\"}' > \"$HOME/Library/Application Support/NotchBar/agents/claude.json\"" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "mkdir -p \"$HOME/Library/Application Support/NotchBar/agents\" && printf '%s' '{\"id\":\"claude\",\"tool\":\"Claude\",\"state\":\"done\"}' > \"$HOME/Library/Application Support/NotchBar/agents/claude.json\"" }] }]
+  }
+}
+```
+
+Codex can use the same folder. Point a Codex `Stop` hook, or a small wrapper you already run when a task finishes, at `~/Library/Application Support/NotchBar/agents/codex.json` with `"tool":"Codex"`. NotchBar does not install these hooks for you.
+
 | What you get | Terminal `claude` | Desktop app and VS Code |
 |---|:--:|:--:|
 | Spinner starts and stops the moment Claude does | ✅ | ✅ |
@@ -312,7 +339,7 @@ flowchart LR
 - Chrome names each tab in its tab strip "Title" followed by status notes in any order, such as "– Audio playing" and "- Memory usage - 462 MB". The audible marker isn't always last.
 - Chrome holds its audio stream open about 15 seconds after a pause, so pause detection reads the tab strip instead.
 - Connecting headphones restores their saved volume, which reports a volume change. Device banners outrank the volume HUD so they aren't replaced.
-- Per-app volume installs a process tap only while a slider isn't at 100% or the app is muted. At 100% the tap is removed, so the app plays as it does without NotchBar. If the tap can't start, it is torn down and the app is left at its normal volume.
+- Per-app volume installs a process tap only while a slider isn't at 100%, the app is muted, or that app is routed to a chosen output. Otherwise the tap is removed, so the app plays as it does without NotchBar. If the tap can't start, it is torn down and the app is left at its normal volume.
 - TCC permissions belong to the responsible process. Launch NotchBar with `open`, not from a terminal, when testing permissions.
 
 </details>
@@ -322,7 +349,7 @@ flowchart LR
 - **Stays on your Mac.** Everything NotchBar reads stays on your Mac. The only network request is weather, once you turn it on, and the location it sends is rounded to about a kilometre.
 - **No content.** NotchBar sees that an app uses the microphone, never what it hears.
 - **Camera.** The camera runs only while the camera glance is on screen. Nothing is recorded or saved.
-- **Mixer.** Turning an app down listens to that app so it can be played quieter. Nothing is recorded or stored, and an app at 100% isn't listened to.
+- **Mixer.** Turning an app down, or sending it to another output, listens to that app so it can be played quieter or on that device. Nothing is recorded or stored. An app at 100% on the default output isn't listened to.
 - **No secrets.** NotchBar never reads passwords, tokens or keychain items.
 - **Clipboard.** Concealed items and password managers are skipped.
 
@@ -428,7 +455,7 @@ Sources/NotchBar/
     Clipboard/  Clipboard history
     Timer/      Countdown timer
     HUD/        Volume, brightness, headphones, and the optional key takeover
-    Mixer/      Per-app volume. No taps until a slider moves off 100%
+    Mixer/      Per-app volume. No taps until a slider moves off 100%, or an app has its own output
   Shared/     Small helpers: sleep-aware timer, file watcher, controls, formatting
 ```
 

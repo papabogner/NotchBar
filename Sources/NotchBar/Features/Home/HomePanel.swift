@@ -56,7 +56,26 @@ struct HomePanel: View {
             MonthGrid(calendar: calendar).frame(maxWidth: 280, alignment: .leading)
         case .mixer:
             if vm.isEnabled(.mixer) { slimMixer }
+        case .agents:
+            agentsCard
         }
+    }
+
+    private var agentsCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if vm.agents.sessions.isEmpty {
+                Text("No Claude Code or Codex session").font(.system(size: 12)).foregroundStyle(.secondary)
+            } else {
+                ForEach(vm.agents.sessions.prefix(3)) { session in
+                    HStack(spacing: 6) {
+                        Circle().fill(session.state == .working ? Color.green : Color.orange).frame(width: 6, height: 6)
+                        Text(session.tool).font(.system(size: 12, weight: .semibold))
+                        Text(session.state.label).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// System volume and the app that is playing. The full console stays on the Mixer tab.

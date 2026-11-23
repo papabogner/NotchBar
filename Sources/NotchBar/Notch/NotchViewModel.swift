@@ -28,6 +28,7 @@ final class NotchViewModel: ObservableObject {
         case timerDone
         case meeting(CalendarEvent)
         case device(DeviceEvent)
+        case agent(String)
 
         /// A banner never replaces one with a higher priority.
         var priority: Int {
@@ -37,7 +38,7 @@ final class NotchViewModel: ObservableObject {
             // A device switching restores its saved volume, which reports a volume change,
             // so a device outranks the volume HUD that would otherwise replace it at once.
             case .device: return 2
-            case .timerDone, .meeting: return 3
+            case .timerDone, .meeting, .agent: return 3
             }
         }
 
@@ -47,6 +48,7 @@ final class NotchViewModel: ObservableObject {
             case .hud: return 1.6
             case .device(let event): return event.connected ? 5 : 3.5
             case .meeting: return 20
+            case .agent: return 6
             case .timerDone: return 30
             }
         }
@@ -88,6 +90,7 @@ final class NotchViewModel: ObservableObject {
     let homeLayout = HomeLayout()
     let appearance = NotchAppearance()
     let ticker: TickerStore
+    let agents = AgentMonitor()
     @Published var showsAppearance = false
     let camera = CameraGlance()
 
@@ -116,6 +119,8 @@ final class NotchViewModel: ObservableObject {
         self.clipboard = clipboard
         self.calendar = calendar
         ticker = TickerStore(media: media, calendar: calendar, usage: usage)
+        agents.onAlert = { [weak self] text in self?.show(.agent(text)) }
+        agents.onLine = { [weak self] line in self?.ticker.agentLine = line }
         enabledTabs = Self.loadEnabledTabs()
 
         // The closed notch's width depends on the timer and on playback, so redraw with them.
@@ -149,9 +154,17 @@ final class NotchViewModel: ObservableObject {
         // The mixer list follows playback while its tab or the Home strips are showing.
         // Moving a slider is what starts a tap; opening the tab does not.
         mixer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
-        homeLayout.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        homeLayout.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+            self?.updateAgentWatch()
+        }.store(in: &bag)
         appearance.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
-        ticker.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        ticker.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+            self?.updateAgentWatch()
+        }.store(in: &bag)
+        agents.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        updateAgentWatch()
         Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
             .sink { [weak self] _, _, _ in self?.refreshMixerSurfaces() }
             .store(in: &bag)
@@ -256,6 +269,17 @@ final class NotchViewModel: ObservableObject {
         refreshMixerSurfaces()
     }
 
+    private func updateAgentWatch() {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let wants = self.homeLayout.isEnabled(.agents)
+                    || (self.ticker.isEnabled && self.ticker.sources.contains(.agents))
+                self.agents.setActive(wants)
+            }
+        }
+    }
+
     /// The mixer list is live on its own tab, and on Home only while the combined panel is on.
     func refreshMixerSurfaces() {
         let mixerTab = isExpanded && tab == .mixer && !showsCamera
@@ -320,6 +344,7 @@ final class NotchViewModel: ObservableObject {
                 let minutes = Int(ceil(event.start.timeIntervalSinceNow / 60))
                 showToast(minutes > 0 ? "\(event.title) starts in \(minutes) min" : "\(event.title) is starting now")
             }
+            if case .agent(let text) = new { showToast(text) }
             return
         }
         // While a device banner shows, a volume change updates its volume instead.

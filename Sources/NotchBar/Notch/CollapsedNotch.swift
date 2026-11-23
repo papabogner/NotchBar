@@ -84,6 +84,10 @@ struct CollapsedNotch: View {
         case .device(let event):
             DeviceBanner(event: event).id(event.name + (event.connected ? "+" : "-"))
                 .dismissable { vm.dismissBanner() }
+        case .agent(let text):
+            Text(text).font(.system(size: 13, weight: .semibold)).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .dismissable { vm.dismissBanner() }
         }
     }
 }
