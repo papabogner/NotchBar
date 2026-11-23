@@ -25,9 +25,9 @@ enum SettingsWindow {
 
 private struct SettingsRoot: View {
     @ObservedObject var vm: NotchViewModel
-    @State private var section: Section = .general
+    @State private var section: Pane = .general
 
-    private enum Section: String, CaseIterable, Identifiable {
+    private enum Pane: String, CaseIterable, Identifiable {
         case general, audio, look, ticker, integrations, shortcuts, about
         var id: String { rawValue }
         var title: String {
@@ -45,7 +45,7 @@ private struct SettingsRoot: View {
 
     var body: some View {
         NavigationSplitView {
-            List(Section.allCases, selection: $section) { item in
+            List(Pane.allCases, selection: $section) { item in
                 Text(item.title).tag(item)
             }
             .listStyle(.sidebar)
