@@ -91,6 +91,7 @@ final class NotchViewModel: ObservableObject {
     let appearance = NotchAppearance()
     let ticker: TickerStore
     let agents = AgentMonitor()
+    let hotkeys = HotkeyController()
     @Published var showsAppearance = false
     @Published var showsTickerSettings = false
     let camera = CameraGlance()
@@ -132,6 +133,13 @@ final class NotchViewModel: ObservableObject {
         agents.onLine = { [weak self] line in
             MainActor.assumeIsolated { self?.ticker.agentLine = line }
         }
+        hotkeys.onToggle = { [weak self] in
+            guard let self else { return }
+            if self.isExpanded { self.close() } else { self.open(self.preferredTab) }
+        }
+        hotkeys.onMute = { [weak self] in self?.volumes.toggleMasterMute() }
+        hotkeys.onScene = { [weak self] in self?.volumes.cycleScene() }
+        hotkeys.installIfNeeded()
 
         // The closed notch's width depends on the timer and on playback, so redraw with them.
         timer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)

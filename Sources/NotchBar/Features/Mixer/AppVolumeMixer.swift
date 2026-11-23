@@ -215,6 +215,17 @@ final class AppVolumeMixer: ObservableObject {
         }
     }
 
+    /// Control-Option-S steps through the scenes that have been saved.
+    func cycleScene() {
+        let names = ["Focus", "Call"].filter { hasScene($0) }
+        guard !names.isEmpty else { return }
+        let name = names[sceneCursor % names.count]
+        sceneCursor += 1
+        recallScene(name)
+    }
+
+    private var sceneCursor = 0
+
     func recallScene(_ name: String) {
         guard !isPreview, let scene = loadScenes()[name] else { return }
         guard #available(macOS 14.4, *) else { return }

@@ -8,7 +8,7 @@ let package = Package(
         .executableTarget(
             name: "NotchBar",
             path: "Sources/NotchBar",
-            linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("ServiceManagement")]
+            linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("ServiceManagement"), .linkedFramework("Carbon")]
         )
     ]
 )

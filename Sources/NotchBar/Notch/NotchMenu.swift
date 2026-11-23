@@ -71,6 +71,9 @@ enum NotchMenu {
     private static func addSystemItems(to menu: NSMenu, vm: NotchViewModel) {
         let hud = vm.hudService
         addTickerItems(to: menu, vm: vm)
+        let hotkeys = Item("Global Hotkeys", checked: vm.hotkeys.isEnabled) { vm.hotkeys.setEnabled(!vm.hotkeys.isEnabled) }
+        hotkeys.toolTip = "⌃⌥N opens or closes the notch. ⌃⌥M mutes the system output. ⌃⌥S recalls the next saved scene."
+        menu.addItem(hotkeys)
         menu.addItem(Item("Appearance…") {
             vm.showsAppearance = true
             vm.open(.home)
