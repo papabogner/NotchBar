@@ -197,7 +197,12 @@ enum Snapshotter {
             AppVolumeRow(id: "com.apple.podcasts", name: "Podcasts", level: 100, muted: true, playing: false),
         ], previewMaster: MasterLevel(name: "Speakers", level: 64, muted: false))
         render("23-mixer", volumes: mixer, configure: expanded(.mixer))
-        render("24-home-mixer", volumes: mixer, configure: expanded(.home))
+        render("24-home-mixer", volumes: mixer) { vm in
+            vm.isExpanded = true
+            vm.tab = .home
+            vm.homeLayout.writesChanges = false
+            vm.homeLayout.setEnabled(.mixer, true)
+        }
         let classic = AppVolumeMixer(preview: [])
         classic.combineOnHome = false
         render("00b-home-classic", volumes: classic, configure: expanded(.home))

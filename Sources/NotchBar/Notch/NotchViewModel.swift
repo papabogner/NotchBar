@@ -85,6 +85,7 @@ final class NotchViewModel: ObservableObject {
     let dictation: DictationMonitor
     let activity: ActivityMonitor
     let volumes: AppVolumeMixer
+    let homeLayout = HomeLayout()
     let camera = CameraGlance()
 
     static let openSpring = Animation.spring(response: 0.42, dampingFraction: 0.76)
@@ -144,6 +145,7 @@ final class NotchViewModel: ObservableObject {
         // The mixer list follows playback while its tab or the Home strips are showing.
         // Moving a slider is what starts a tap; opening the tab does not.
         mixer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        homeLayout.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
             .sink { [weak self] _, _, _ in self?.refreshMixerSurfaces() }
             .store(in: &bag)
@@ -214,7 +216,7 @@ final class NotchViewModel: ObservableObject {
         let content: CGFloat
         switch tab {
         case _ where showsCamera: content = 262
-        case .home: content = (isEnabled(.mixer) && volumes.combineOnHome) ? 448 : 346
+        case .home: content = 346
         case .calendar, .activity: content = 222
         case .mixer: content = 300
         default: content = 150
@@ -250,7 +252,7 @@ final class NotchViewModel: ObservableObject {
     /// The mixer list is live on its own tab, and on Home only while the combined panel is on.
     func refreshMixerSurfaces() {
         let mixerTab = isExpanded && tab == .mixer && !showsCamera
-        let home = isExpanded && tab == .home && !showsCamera && isEnabled(.mixer) && volumes.combineOnHome
+        let home = isExpanded && tab == .home && !showsCamera && isEnabled(.mixer) && homeLayout.isEnabled(.mixer)
         volumes.setSurfaces(mixerTab: mixerTab, home: home)
     }
 

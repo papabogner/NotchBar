@@ -75,12 +75,16 @@ enum NotchMenu {
         let dictation = vm.dictation
         menu.addItem(Item("Show Dictation (Handy and Others)", checked: dictation.isEnabled) { dictation.isEnabled.toggle() })
         if NotchViewModel.Tab.offered.contains(.mixer) {
-            let combined = Item("Mixer on Home", checked: vm.volumes.combineOnHome) {
-                vm.volumes.combineOnHome.toggle()
+            menu.addItem(Item("Customize Home…") {
+                vm.homeLayout.isCustomizing = true
+                vm.open(.home)
+            })
+            let mixerCard = Item("Mixer on Home", checked: vm.homeLayout.isEnabled(.mixer)) {
+                vm.homeLayout.setEnabled(.mixer, !vm.homeLayout.isEnabled(.mixer))
                 vm.refreshMixerSurfaces()
             }
-            combined.toolTip = "Shows now playing and the volume strips together. Turn off to restore the old Home."
-            menu.addItem(combined)
+            mixerCard.toolTip = "A slim System and now-playing fader on Home. The full mixer stays on hover and the Mixer tab."
+            menu.addItem(mixerCard)
             menu.addItem(Item("Open on Hover", checked: vm.openOnHover) { vm.openOnHover.toggle() })
             let mixerHover = Item("Mixer on Hover", checked: vm.mixerOnHover) { vm.mixerOnHover.toggle() }
             mixerHover.toolTip = "Hovering the notch opens the Mixer. Click still opens whatever you tapped."

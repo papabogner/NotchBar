@@ -116,7 +116,7 @@ struct MixerStripRow: View {
 }
 
 /// The system output. Visually heavier than an app strip, and it never installs a process tap.
-private struct MasterStrip: View {
+struct MasterStrip: View {
     @ObservedObject var mixer: AppVolumeMixer
     var compact: Bool
 
@@ -145,7 +145,7 @@ private struct MasterStrip: View {
 }
 
 /// A vertical channel: icon, name, fader, level, mute.
-private struct ChannelStrip: View {
+struct ChannelStrip: View {
     let row: AppVolumeRow
     @ObservedObject var mixer: AppVolumeMixer
     var compact: Bool

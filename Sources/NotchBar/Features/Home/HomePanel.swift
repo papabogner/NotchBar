@@ -10,87 +10,108 @@ struct HomePanel: View {
     @ObservedObject var calendar: CalendarStore
     @ObservedObject var weather: WeatherStore
     @ObservedObject var volumes: AppVolumeMixer
-
-    private var combinedHome: Bool { volumes.combineOnHome && vm.isEnabled(.mixer) }
+    @ObservedObject var layout: HomeLayout
 
     var body: some View {
         Group {
-            if combinedHome {
-                combined
+            if layout.isCustomizing {
+                customize
             } else {
-                columns
+                cardGrid
             }
         }
-        .frame(height: combinedHome ? 406 : 304, alignment: .top)
+        .frame(height: 304, alignment: .top)
     }
 
-    /// Now playing on the left, tall mixer pills on the right, then the rest of Home.
-    /// Taller than the classic Home so the faders are usable.
-    private var combined: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                HomeMediaWidget(media: media) { vm.select(.media) }
-                    .frame(width: 236)
-                Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 100)
-                VStack(alignment: .leading, spacing: 4) {
-                    WidgetHeader(title: "Mixer", action: { vm.select(.mixer) }) {
-                        Image(systemName: "slider.horizontal.3")
-                    }
-                    if volumes.needsApplyHint {
-                        Text("Drag a fader to apply.").font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.45))
-                    }
-                    MixerStripRow(mixer: volumes, highlight: media.nowPlaying?.source.bundleID, compact: false)
-                        .frame(height: 196)
+    private var cardGrid: some View {
+        let cards = layout.visible
+        let columns = [GridItem(.flexible(), spacing: 22), GridItem(.flexible(), spacing: 22)]
+        return ScrollView {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
+                ForEach(cards) { card in
+                    cardView(card).frame(maxWidth: .infinity, alignment: .topLeading)
                 }
             }
-            .frame(height: 220, alignment: .top)
-            lowerColumns
         }
+        .scrollIndicators(.hidden)
     }
 
-    /// Calendar, weather, and the rest, without the now-playing block (that sits in the combined row).
-    private var lowerColumns: some View {
-        HStack(alignment: .top, spacing: 26) {
-            MonthGrid(calendar: calendar)
-                .frame(width: 252, alignment: .topLeading)
-            VStack(alignment: .leading, spacing: 18) {
-                HomeWeatherWidget(weather: weather)
-                upNext
-            }
-            .frame(width: 214, alignment: .topLeading)
-            restColumn
-        }
-        .frame(height: 174, alignment: .top)
-    }
-
-    private var restColumn: some View {
-        VStack(alignment: .leading, spacing: 18) {
+    @ViewBuilder private func cardView(_ card: HomeLayout.Card) -> some View {
+        switch card {
+        case .nowPlaying:
+            HomeMediaWidget(media: media) { vm.select(.media) }
+        case .upNext:
+            upNext
+        case .weather:
+            HomeWeatherWidget(weather: weather)
+        case .claude:
             HomeClaudeWidget(usage: usage) { vm.select(.claude) }
+        case .timer:
             HomeTimerWidget(timer: timer) { vm.select(.timer) }
+        case .activity:
             if vm.isEnabled(.activity) {
                 HomeActivityWidget(monitor: vm.activity) { vm.select(.activity) }
             }
+        case .calendar:
+            MonthGrid(calendar: calendar).frame(maxWidth: 280, alignment: .leading)
+        case .mixer:
+            if vm.isEnabled(.mixer) { slimMixer }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    private var columns: some View {
-        HStack(alignment: .top, spacing: 26) {
-            VStack(alignment: .leading, spacing: 18) {
-                HomeMediaWidget(media: media) { vm.select(.media) }
-                MonthGrid(calendar: calendar)
+    /// System volume and the app that is playing. The full console stays on the Mixer tab.
+    private var slimMixer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            WidgetHeader(title: "Mixer", action: { vm.select(.mixer) }) {
+                Image(systemName: "slider.horizontal.3")
             }
-            .frame(width: 252)
-
-            VStack(alignment: .leading, spacing: 18) {
-                HomeWeatherWidget(weather: weather)
-                upNext
+            HStack(alignment: .top, spacing: 8) {
+                MasterStrip(mixer: volumes, compact: true)
+                if let playing = volumes.rows.first(where: \.playing) {
+                    ChannelStrip(row: playing, mixer: volumes, compact: true, highlighted: true)
+                } else {
+                    Text("Nothing playing").font(.system(size: 11)).foregroundStyle(.white.opacity(0.45))
+                        .frame(height: 72, alignment: .center)
+                }
             }
-            .frame(width: 214, alignment: .topLeading)
-
-            restColumn
+            .frame(height: 108, alignment: .top)
         }
-        .frame(height: 304, alignment: .top)
+    }
+
+    private var customize: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Customize Home").font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("Done") { layout.isCustomizing = false }
+                    .buttonStyle(PressableStyle(scale: 0.96))
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            ScrollView {
+                VStack(spacing: 4) {
+                    ForEach(layout.items) { item in
+                        HStack(spacing: 8) {
+                            Button { layout.setEnabled(item.card, !item.enabled) } label: {
+                                Image(systemName: item.enabled ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(item.enabled ? .white : .white.opacity(0.35))
+                            }
+                            .buttonStyle(PressableStyle())
+                            Text(item.card.title).font(.system(size: 13, weight: .medium))
+                            Spacer()
+                            Button { layout.move(item.card, up: true) } label: {
+                                Image(systemName: "chevron.up").font(.system(size: 11, weight: .bold))
+                            }
+                            .buttonStyle(PressableStyle())
+                            Button { layout.move(item.card, up: false) } label: {
+                                Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
+                            }
+                            .buttonStyle(PressableStyle())
+                        }
+                        .foregroundStyle(.white)
+                    }
+                }
+            }
+        }
     }
 
     private var upNext: some View {
