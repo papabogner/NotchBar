@@ -96,6 +96,7 @@ final class NotchViewModel: ObservableObject {
     let shelf = FileShelf()
     let spotify = SpotifyConnect()
     let mini = MiniStatus()
+    let portfolio = PortfolioStore()
     @Published var showsAppearance = false
     @Published var showsTickerSettings = false
     @Published var showsSpotify = false
@@ -162,6 +163,11 @@ final class NotchViewModel: ObservableObject {
         shelf.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         spotify.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         mini.onUpdate = { [weak self] in self?.ticker.miniLine = self?.mini.line ?? "" }
+        portfolio.onUpdate = { [weak self] in self?.ticker.portfolioLine = self?.portfolio.pulse?.line ?? "" }
+        portfolio.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+            self?.updateAgentWatch()
+        }.store(in: &bag)
         mini.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
             self?.updateAgentWatch()
@@ -326,6 +332,9 @@ final class NotchViewModel: ObservableObject {
                 let miniHome = self.isExpanded && self.tab == .home && self.mini.isEnabled
                 let miniTicker = self.ticker.isEnabled && self.ticker.sources.contains(.mini) && self.mini.isEnabled
                 self.mini.setWatching(miniHome || miniTicker)
+                let bookHome = self.isExpanded && self.tab == .home && self.portfolio.isEnabled
+                let bookTicker = self.ticker.isEnabled && self.ticker.sources.contains(.portfolio) && self.portfolio.isEnabled
+                self.portfolio.setWatching(bookHome || bookTicker)
             }
         }
     }

@@ -4,7 +4,7 @@ import AppKit
 @MainActor
 final class TickerStore: ObservableObject {
     enum Source: String, CaseIterable, Identifiable, Codable {
-        case nowPlaying, calendar, claude, agents, custom, feed, crypto, mini
+        case nowPlaying, calendar, claude, agents, custom, feed, crypto, mini, portfolio
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -16,6 +16,7 @@ final class TickerStore: ObservableObject {
             case .feed: return "Feed"
             case .crypto: return "Crypto"
             case .mini: return "Mac mini"
+            case .portfolio: return "Portfolio"
             }
         }
     }
@@ -39,6 +40,8 @@ final class TickerStore: ObservableObject {
     @Published var agentLine: String = ""
     /// Filled by the Mac mini probe when that ticker source is on.
     @Published var miniLine: String = ""
+    /// Filled by the portfolio total when that ticker source is on.
+    @Published var portfolioLine: String = ""
     @Published private(set) var menuBarHidden = false
 
     private let media: MediaController
@@ -103,6 +106,7 @@ final class TickerStore: ObservableObject {
         }
         if sources.contains(.agents), !agentLine.isEmpty { lines.append(agentLine) }
         if sources.contains(.mini), !miniLine.isEmpty { lines.append(miniLine) }
+        if sources.contains(.portfolio), !portfolioLine.isEmpty { lines.append(portfolioLine) }
         if sources.contains(.custom), !customText.isEmpty { lines.append(customText) }
         if sources.contains(.feed) { lines.append(contentsOf: feedLines.prefix(5)) }
         if sources.contains(.crypto), !cryptoLine.isEmpty { lines.append(cryptoLine) }

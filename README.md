@@ -127,6 +127,7 @@ Banners drop from the notch for a moment, then tuck back in.
 - **Saved volumes.** **… > Apply Saved Volumes** puts an app back to its saved level, mute, and output when it starts playing. Off, a saved level still waits until you move that fader. An output chosen on a strip is remembered either way.
 - **Spotify Connect.** Off until **… > Spotify Connect**. Setup is in [Spotify Connect](#spotify-connect).
 - **Mac mini.** Off until **… > Mac mini Status**. **… > Mac mini…** sets the SSH alias (default `mini`). NotchBar runs `ssh -o BatchMode=yes` about once a minute while Home or the Mac mini ticker source is showing.
+- **Portfolio.** Off until **… > Show Portfolio**. Holdings live in `~/Library/Application Support/NotchBar/portfolio.json`. **… > Portfolio › Edit Holdings…** creates a placeholder file (those amounts are examples, not yours) and opens it. Prices come from CoinGecko about every five minutes. A file `portfolio-status.json` in the same folder, with `total`, `change24hPct`, and `note`, replaces the calculated total when another tool writes it.
 
 </details>
 

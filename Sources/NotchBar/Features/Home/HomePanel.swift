@@ -35,11 +35,17 @@ struct HomePanel: View {
                 }
             }
             .frame(maxHeight: .infinity)
-            if vm.mini.isEnabled || statusLine != nil {
+            if vm.mini.isEnabled || vm.portfolio.isEnabled || statusLine != nil {
                 HStack(spacing: 8) {
                     if vm.mini.isEnabled {
                         Circle().fill(vm.mini.report.online ? Color.green : Color.orange).frame(width: 6, height: 6)
                         Text(vm.mini.line).lineLimit(1)
+                    }
+                    if vm.portfolio.isEnabled, let pulse = vm.portfolio.pulse {
+                        Text(pulse.totalText).lineLimit(1)
+                        Text(pulse.changeText).lineLimit(1)
+                            .foregroundStyle(pulse.isUp ? Color.green : Color.red)
+                        if !pulse.top.isEmpty { Text(pulse.top).lineLimit(1).foregroundStyle(.white.opacity(0.55)) }
                     }
                     if let line = statusLine {
                         Text(line).lineLimit(1)

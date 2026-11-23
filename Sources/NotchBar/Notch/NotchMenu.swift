@@ -93,6 +93,10 @@ enum NotchMenu {
         let mini = Item("Mac mini Status", checked: vm.mini.isEnabled) { vm.mini.setEnabled(!vm.mini.isEnabled) }
         mini.toolTip = "Reads uptime, load, and free disk from an SSH alias. Default host is mini. Never asks for a password."
         menu.addItem(mini)
+        let book = Item("Show Portfolio", checked: vm.portfolio.isEnabled) { vm.portfolio.setEnabled(!vm.portfolio.isEnabled) }
+        book.toolTip = "Totals the holdings in portfolio.json. Edit Holdings creates a placeholder file if you don't have one."
+        menu.addItem(book)
+        menu.addItem(Item("Portfolio › Edit Holdings…") { vm.portfolio.editHoldings() })
         menu.addItem(Item("Mac mini…") {
             vm.showsAppearance = false
             vm.showsTickerSettings = false
