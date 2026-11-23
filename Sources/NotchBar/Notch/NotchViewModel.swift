@@ -96,7 +96,8 @@ final class NotchViewModel: ObservableObject {
         self.weather = weather
         self.dictation = dictation
         self.activity = activity
-        self.volumes = volumes ?? AppVolumeMixer()
+        let mixer = volumes ?? AppVolumeMixer()
+        self.volumes = mixer
         hideFromScreenshots = UserDefaults.standard.bool(forKey: "hideFromScreenshots")
         self.media = media
         self.usage = usage
@@ -136,7 +137,7 @@ final class NotchViewModel: ObservableObject {
             .store(in: &bag)
         // The mixer list follows playback while its tab or the Home strips are showing.
         // Moving a slider is what starts a tap; opening the tab does not.
-        volumes.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        mixer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
             .sink { [weak self] expanded, tab, showsCamera in
                 guard let self else { return }

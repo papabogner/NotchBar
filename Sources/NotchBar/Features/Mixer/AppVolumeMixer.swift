@@ -48,8 +48,11 @@ final class AppVolumeMixer: ObservableObject {
     init(systemAudio: SystemAudio? = nil, activity: AudioActivityMonitor? = nil, preview: [AppVolumeRow]? = nil) {
         // Defaults are applied in the body. A default argument runs outside the main actor,
         // so `SystemAudio()` and `AudioActivityMonitor.shared` cannot live in the signature.
-        self.systemAudio = systemAudio ?? SystemAudio()
-        self.activity = activity ?? AudioActivityMonitor.shared
+        // Locals, not the optional parameters: those names would shadow the stored properties.
+        let audio = systemAudio ?? SystemAudio()
+        let monitor = activity ?? AudioActivityMonitor.shared
+        self.systemAudio = audio
+        self.activity = monitor
         if let preview {
             rows = preview
             isPreview = true
