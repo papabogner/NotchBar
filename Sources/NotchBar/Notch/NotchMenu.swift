@@ -70,6 +70,10 @@ enum NotchMenu {
 
     private static func addSystemItems(to menu: NSMenu, vm: NotchViewModel) {
         let hud = vm.hudService
+        menu.addItem(Item("Appearance…") {
+            vm.showsAppearance = true
+            vm.open(.home)
+        })
         menu.addItem(Item("Show Volume & Brightness", checked: hud.showHUDs) { hud.showHUDs.toggle() })
         menu.addItem(Item("Show Headphone Connections", checked: hud.showDevices) { hud.showDevices.toggle() })
         let dictation = vm.dictation

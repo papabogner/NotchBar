@@ -24,7 +24,9 @@ struct ExpandedNotch: View {
     }
 
     @ViewBuilder private var content: some View {
-        if vm.showsCamera {
+        if vm.showsAppearance {
+            AppearancePanel(appearance: vm.appearance) { vm.showsAppearance = false }
+        } else if vm.showsCamera {
             CameraGlancePanel(camera: vm.camera) { vm.toggleCamera() }
         } else {
             tabContent

@@ -86,6 +86,8 @@ final class NotchViewModel: ObservableObject {
     let activity: ActivityMonitor
     let volumes: AppVolumeMixer
     let homeLayout = HomeLayout()
+    let appearance = NotchAppearance()
+    @Published var showsAppearance = false
     let camera = CameraGlance()
 
     static let openSpring = Animation.spring(response: 0.42, dampingFraction: 0.76)
@@ -146,6 +148,7 @@ final class NotchViewModel: ObservableObject {
         // Moving a slider is what starts a tap; opening the tab does not.
         mixer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         homeLayout.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        appearance.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
             .sink { [weak self] _, _, _ in self?.refreshMixerSurfaces() }
             .store(in: &bag)
@@ -291,6 +294,7 @@ final class NotchViewModel: ObservableObject {
         withAnimation(Self.closeSpring) {
             isExpanded = false
             showsCamera = false
+            showsAppearance = false
         }
     }
 

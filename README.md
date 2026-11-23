@@ -115,6 +115,7 @@ Banners drop from the notch for a moment, then tuck back in.
 - **Tidy menu bar.** **… > Tidy Menu Bar Icons** tucks icons you rarely use behind a chevron, so the ones you need fit beside the notch. ⌘-drag an icon right of the thin divider to keep it visible.
 - **Lock Screen** and battery level in the header.
 - **Show only what you use.** Hide any tab from **… > Show Tabs**, and turn off banners you don't want from the same menu.
+- **Appearance.** **… > Appearance** picks Classic, Glass, Neon, Console, or a custom color and gradient. Album colors follow the artwork. The closed notch stays black.
 
 </details>
 

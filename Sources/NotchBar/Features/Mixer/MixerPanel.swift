@@ -210,6 +210,7 @@ private struct PillFader<Icon: View>: View {
     var onReset: () -> Void
     var onSolo: (() -> Void)? = nil
     @ViewBuilder var icon: Icon
+    @Environment(\.notchChrome) private var chrome
     @State private var dragging = false
     @State private var origin: Int?
 
@@ -218,9 +219,9 @@ private struct PillFader<Icon: View>: View {
             let fraction = CGFloat(min(maxLevel, max(0, level))) / CGFloat(max(maxLevel, 1))
             let fill = muted ? 0 : g.size.height * fraction
             ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(0.14))
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.white.opacity(muted ? 0.28 : 0.92))
+                RoundedRectangle(cornerRadius: chrome.faderCorner, style: .continuous).fill(.white.opacity(0.14))
+                RoundedRectangle(cornerRadius: chrome.faderCorner, style: .continuous)
+                    .fill((chrome.preset == .neon ? chrome.accent : .white).opacity(muted ? 0.28 : 0.92))
                     .frame(height: max(0, fill))
                 VStack(spacing: 0) {
                     Text(muted ? "Off" : "\(level)")
