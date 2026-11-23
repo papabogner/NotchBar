@@ -23,7 +23,7 @@ struct MixerPanel: View {
                     Spacer(minLength: 8)
                     sceneMenu
                 }
-                MixerStripRow(mixer: mixer, highlight: highlight, compact: false)
+                MixerStripRow(mixer: mixer, highlight: highlight, compact: false, spotify: spotify)
             }
             if let status = mixer.statusMessage {
                 Text(status).font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
@@ -102,6 +102,7 @@ struct MixerStripRow: View {
     @ObservedObject var mixer: AppVolumeMixer
     var highlight: String?
     var compact: Bool
+    var spotify: SpotifyConnect? = nil
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {

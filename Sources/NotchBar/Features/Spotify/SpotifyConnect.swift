@@ -103,16 +103,25 @@ final class SpotifyConnect: ObservableObject {
             return
         }
         status = "Waiting for Spotify in the browser…"
-        Task { @MainActor [weak self] in
-            let result = await Task.detached { () -> Result<String, String> in
-                SpotifyLoopback.waitForCode(open: url, state: state, timeout: 180)
-            }.value
-            guard let self else { return }
-            switch result {
-            case .failure(let message):
-                self.status = message
-            case .success(let code):
-                await self.exchange(code: code, verifier: verifier)
+        let pageURL = url
+        switch SpotifyLoopback.bind() {
+        case .failure(let error):
+            status = error.message
+            return
+        case .success(let listener):
+            NSWorkspace.shared.open(pageURL)
+            let expected = state
+            Task { @MainActor [weak self] in
+                let result = await Task.detached {
+                    SpotifyLoopback.acceptCode(fd: listener, state: expected, timeout: 180)
+                }.value
+                guard let self else { return }
+                switch result {
+                case .failure(let error):
+                    self.status = error.message
+                case .success(let code):
+                    await self.exchange(code: code, verifier: verifier)
+                }
             }
         }
     }
@@ -381,14 +390,18 @@ enum SpotifyKeychain {
     }
 }
 
+struct SpotifyLoopbackError: Error, Sendable {
+    let message: String
+}
+
 /// One-shot loopback so Spotify can redirect without a custom URL scheme.
 enum SpotifyLoopback {
     nonisolated static let port: UInt16 = 47321
 
-    nonisolated static func waitForCode(open url: URL, state: String, timeout: TimeInterval) -> Result<String, String> {
+    /// Binds 127.0.0.1:47321. The caller opens the browser, then `acceptCode` waits.
+    nonisolated static func bind() -> Result<Int32, SpotifyLoopbackError> {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return .failure("Couldn't open a local port.") }
-        defer { close(fd) }
+        guard fd >= 0 else { return .failure(SpotifyLoopbackError(message: "Couldn't open a local port.")) }
         var yes: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
         var address = sockaddr_in()
@@ -402,17 +415,20 @@ enum SpotifyLoopback {
             }
         }
         guard bound == 0, Darwin.listen(fd, 1) == 0 else {
-            return .failure("Port 47321 is in use. Free it and sign in again.")
+            close(fd)
+            return .failure(SpotifyLoopbackError(message: "Port 47321 is in use. Free it and sign in again."))
         }
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated { NSWorkspace.shared.open(url) }
-        }
+        return .success(fd)
+    }
+
+    nonisolated static func acceptCode(fd: Int32, state: String, timeout: TimeInterval) -> Result<String, SpotifyLoopbackError> {
+        defer { close(fd) }
         var waiting = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
         guard poll(&waiting, 1, Int32(timeout * 1000)) > 0 else {
-            return .failure("Spotify didn't return. Try signing in again.")
+            return .failure(SpotifyLoopbackError(message: "Spotify didn't return. Try signing in again."))
         }
         let client = accept(fd, nil, nil)
-        guard client >= 0 else { return .failure("Spotify didn't return.") }
+        guard client >= 0 else { return .failure(SpotifyLoopbackError(message: "Spotify didn't return.")) }
         defer { close(client) }
         var buffer = [UInt8](repeating: 0, count: 4096)
         let count = read(client, &buffer, buffer.count)
@@ -420,7 +436,8 @@ enum SpotifyLoopback {
         let page = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<html><body><p>NotchBar is signed in. You can close this tab.</p></body></html>"
         _ = page.withCString { write(client, $0, strlen($0)) }
         guard let code = query("code", in: text), query("state", in: text) == state else {
-            return .failure(text.contains("error=") ? "Spotify declined the sign-in." : "Spotify didn't return a code.")
+            let message = text.contains("error=") ? "Spotify declined the sign-in." : "Spotify didn't return a code."
+            return .failure(SpotifyLoopbackError(message: message))
         }
         return .success(code)
     }
