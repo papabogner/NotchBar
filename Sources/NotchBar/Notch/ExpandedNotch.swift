@@ -42,7 +42,9 @@ struct ExpandedNotch: View {
     }
 
     @ViewBuilder private var content: some View {
-        if vm.showsSpotify {
+        if vm.showsMini {
+            MiniStatusPanel(mini: vm.mini) { vm.showsMini = false }
+        } else if vm.showsSpotify {
             SpotifyConnectPanel(spotify: vm.spotify) { vm.showsSpotify = false }
         } else if vm.showsTickerSettings {
             TickerSettingsPanel(ticker: vm.ticker) { vm.showsTickerSettings = false }

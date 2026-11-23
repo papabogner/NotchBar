@@ -35,10 +35,19 @@ struct HomePanel: View {
                 }
             }
             .frame(maxHeight: .infinity)
-            if let line = statusLine {
-                Text(line).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                    .foregroundStyle(.white.opacity(0.72))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if vm.mini.isEnabled || statusLine != nil {
+                HStack(spacing: 8) {
+                    if vm.mini.isEnabled {
+                        Circle().fill(vm.mini.report.online ? Color.green : Color.orange).frame(width: 6, height: 6)
+                        Text(vm.mini.line).lineLimit(1)
+                    }
+                    if let line = statusLine {
+                        Text(line).lineLimit(1)
+                    }
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }

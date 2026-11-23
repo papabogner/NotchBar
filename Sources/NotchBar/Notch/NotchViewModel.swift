@@ -95,9 +95,11 @@ final class NotchViewModel: ObservableObject {
     let awake = AwakeKeeper()
     let shelf = FileShelf()
     let spotify = SpotifyConnect()
+    let mini = MiniStatus()
     @Published var showsAppearance = false
     @Published var showsTickerSettings = false
     @Published var showsSpotify = false
+    @Published var showsMini = false
     let camera = CameraGlance()
 
     static let openSpring = Animation.spring(response: 0.42, dampingFraction: 0.76)
@@ -159,6 +161,11 @@ final class NotchViewModel: ObservableObject {
         shelf.bind()
         shelf.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         spotify.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        mini.onUpdate = { [weak self] in self?.ticker.miniLine = self?.mini.line ?? "" }
+        mini.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+            self?.updateAgentWatch()
+        }.store(in: &bag)
 
         // The closed notch's width depends on the timer and on playback, so redraw with them.
         timer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
@@ -316,6 +323,9 @@ final class NotchViewModel: ObservableObject {
                 let wants = (self.isExpanded && self.tab == .home && self.homeLayout.isEnabled(.agents))
                     || (self.ticker.isEnabled && self.ticker.sources.contains(.agents))
                 self.agents.setActive(wants)
+                let miniHome = self.isExpanded && self.tab == .home && self.mini.isEnabled
+                let miniTicker = self.ticker.isEnabled && self.ticker.sources.contains(.mini) && self.mini.isEnabled
+                self.mini.setWatching(miniHome || miniTicker)
             }
         }
     }
@@ -365,6 +375,7 @@ final class NotchViewModel: ObservableObject {
             showsAppearance = false
             showsTickerSettings = false
             showsSpotify = false
+            showsMini = false
         }
     }
 

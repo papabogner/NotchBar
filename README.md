@@ -126,6 +126,7 @@ Banners drop from the notch for a moment, then tuck back in.
 - **Ducking.** Off until **… > Duck Other Apps**. Zoom, Teams, FaceTime, Webex, an optional browser Meet tab, or one chosen app lowers everything else to a quarter, then restores it.
 - **Saved volumes.** **… > Apply Saved Volumes** puts an app back to its saved level, mute, and output when it starts playing. Off, a saved level still waits until you move that fader. An output chosen on a strip is remembered either way.
 - **Spotify Connect.** Off until **… > Spotify Connect**. Setup is in [Spotify Connect](#spotify-connect).
+- **Mac mini.** Off until **… > Mac mini Status**. **… > Mac mini…** sets the SSH alias (default `mini`). NotchBar runs `ssh -o BatchMode=yes` about once a minute while Home or the Mac mini ticker source is showing.
 
 </details>
 

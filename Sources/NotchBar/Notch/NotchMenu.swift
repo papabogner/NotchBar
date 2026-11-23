@@ -90,6 +90,16 @@ enum NotchMenu {
         }
         connect.toolTip = "Lists Spotify Connect devices on the Spotify strip and Now Playing. Off until you turn it on."
         menu.addItem(connect)
+        let mini = Item("Mac mini Status", checked: vm.mini.isEnabled) { vm.mini.setEnabled(!vm.mini.isEnabled) }
+        mini.toolTip = "Reads uptime, load, and free disk from an SSH alias. Default host is mini. Never asks for a password."
+        menu.addItem(mini)
+        menu.addItem(Item("Mac mini…") {
+            vm.showsAppearance = false
+            vm.showsTickerSettings = false
+            vm.showsSpotify = false
+            vm.showsMini = true
+            vm.open(.home)
+        })
         menu.addItem(Item("Spotify Connect…") {
             vm.showsAppearance = false
             vm.showsTickerSettings = false
