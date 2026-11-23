@@ -271,7 +271,7 @@ final class NotchViewModel: ObservableObject {
         let content: CGFloat
         switch tab {
         case _ where showsCamera: content = 262
-        case .home: content = 372
+        case .home: content = 252
         case .calendar, .activity: content = 222
         case .mixer: content = 300
         default: content = 150

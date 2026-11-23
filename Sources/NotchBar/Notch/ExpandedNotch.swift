@@ -18,8 +18,8 @@ struct ExpandedNotch: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, vm.topRadius + 16)
-            .padding(.top, 12)
-            .padding(.bottom, vm.toast == nil ? 18 : 48)
+            .padding(.top, 10)
+            .padding(.bottom, vm.toast == nil ? 32 : 48)
             if vm.shelf.showsBar {
                 FileShelfBar(shelf: vm.shelf)
                     .padding(.horizontal, vm.topRadius + 16)

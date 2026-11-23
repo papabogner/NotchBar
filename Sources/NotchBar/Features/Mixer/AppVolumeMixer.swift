@@ -50,6 +50,9 @@ final class AppVolumeMixer: ObservableObject {
     /// Extra bundles that count as the call, such as a browser tab on Meet. Set after init.
     var additionalCallBundles: @MainActor () -> Set<String> = { [] }
     private var duckGain: [String: Float] = [:]
+    /// Bundle IDs that were sending sound recently, newest first. Home uses these when
+    /// the live "playing" flag has not caught up yet.
+    private var recentPlaying: [String] = []
 
     private let systemAudio: SystemAudio
     private let activity: AudioActivityMonitor
@@ -517,8 +520,43 @@ final class AppVolumeMixer: ObservableObject {
             if lhs.playing != rhs.playing { return lhs.playing && !rhs.playing }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
+        for id in next.filter(\.playing).map(\.id).reversed() { rememberRecent(id) }
         rows = next
         showSavedHint = isVisible && !engaged && rows.contains { $0.level != 100 || $0.muted }
+    }
+
+    /// Strips for Home: apps Core Audio says are playing, same as the green dot on the Mixer tab.
+    /// When that list is empty, the Now Playing app and recently active apps fill in.
+    func homeStrips(nowPlayingBundle: String?, nowPlayingName: String?, isPlaying: Bool) -> [AppVolumeRow] {
+        let detected = rows.filter(\.playing)
+        if !detected.isEmpty { return Array(detected.prefix(4)) }
+        var fallback: [AppVolumeRow] = []
+        if isPlaying, let id = nowPlayingBundle {
+            fallback.append(strip(for: id, name: nowPlayingName, forcePlaying: true))
+        }
+        for id in recentPlaying where fallback.count < 4 && !fallback.contains(where: { $0.id == id }) {
+            fallback.append(strip(for: id, name: nil, forcePlaying: true))
+        }
+        return fallback
+    }
+
+    private func strip(for id: String, name: String?, forcePlaying: Bool) -> AppVolumeRow {
+        if var row = rows.first(where: { $0.id == id }) {
+            if forcePlaying { row.playing = true }
+            return row
+        }
+        let level = saved[id]
+        let resolved = name
+            ?? NSRunningApplication.runningApplications(withBundleIdentifier: id).first?.localizedName
+            ?? id
+        return AppVolumeRow(id: id, name: resolved, level: level?.level ?? 100,
+                             muted: level?.muted ?? false, playing: forcePlaying)
+    }
+
+    private func rememberRecent(_ id: String) {
+        recentPlaying.removeAll { $0 == id }
+        recentPlaying.insert(id, at: 0)
+        if recentPlaying.count > 6 { recentPlaying = Array(recentPlaying.prefix(6)) }
     }
 
     func outputDevices() -> [AudioDeviceChoice] { systemAudio.outputDevices() }

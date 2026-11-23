@@ -92,7 +92,7 @@ Banners drop from the notch for a moment, then tuck back in.
 
 **Mixer.** Faders for the system output and for each app that can play, on macOS 14.4 and later. Apps that are playing come first; idle ones are dimmed. The chevron under a strip picks an output, including AirPlay devices macOS is exposing. The master chevron changes the system output. A chosen device is remembered per app, and that app is tapped even at 100% so the sound can go there. If the device disappears, the app falls back to the default. At 100% with no custom output an app is left alone, and nothing is recorded or stored. Hide the tab from **… > Show Tabs**.
 
-**Home.** The notch opens here. Now Playing leads when something is playing, a short row of faders covers the master and the apps that are playing (up to four), and weather stays small. Up Next and Agents appear only when an event is soon or an agent is running. **… > Customize Home** turns cards on and reorders them. **… > Mixer on Hover** is off, so hover opens Home; turn it on to open the Mixer instead.
+**Home.** The notch opens here. The song sits on the left; System and the apps that are playing sit on the right as equal faders. If Core Audio has not marked an app yet, the Now Playing app is shown instead. Weather is a small chip. Claude, an agent, or a timer is one line when there is something to say. **… > Customize Home** turns cards on and reorders them. **… > Mixer on Hover** is off, so hover opens Home; turn it on to open the Mixer instead.
 
 **Ticker.** **… > Show Ticker** is off until you turn it on. It then rotates now playing, the next event, Claude, agents, a line you type, a feed URL, or crypto prices beside the closed notch, and hides in fullscreen.
 
