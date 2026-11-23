@@ -128,6 +128,7 @@ Banners drop from the notch for a moment, then tuck back in.
 - **Spotify Connect.** Off until **… > Spotify Connect**. Setup is in [Spotify Connect](#spotify-connect).
 - **Mac mini.** Off until **… > Mac mini Status**. **… > Mac mini…** sets the SSH alias (default `mini`). NotchBar runs `ssh -o BatchMode=yes` about once a minute while Home or the Mac mini ticker source is showing.
 - **Portfolio.** Off until **… > Show Portfolio**. Holdings live in `~/Library/Application Support/NotchBar/portfolio.json`. **… > Portfolio › Edit Holdings…** creates a placeholder file (those amounts are examples, not yours) and opens it. Prices come from CoinGecko about every five minutes. A file `portfolio-status.json` in the same folder, with `total`, `change24hPct`, and `note`, replaces the calculated total when another tool writes it.
+- **New audio.** **… > Expand on New Audio** is off, including if you already had NotchBar. A new track or app does not drop the now-playing banner or widen the closed notch. Turn it on for the old peek. Agent done and waiting banners are unchanged.
 
 </details>
 

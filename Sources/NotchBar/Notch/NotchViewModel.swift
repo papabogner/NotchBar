@@ -76,6 +76,9 @@ final class NotchViewModel: ObservableObject {
     @Published var openOnHover: Bool { didSet { UserDefaults.standard.set(openOnHover, forKey: "openOnHover") } }
     /// That hover-open shows the Mixer tab.
     @Published var mixerOnHover: Bool { didSet { UserDefaults.standard.set(mixerOnHover, forKey: "mixerOnHover") } }
+    /// A new track or source drops the now-playing banner and widens the closed notch.
+    /// Missing key means off, including for people who had the old always-on peek.
+    @Published var expandOnNewAudio: Bool { didSet { UserDefaults.standard.set(expandOnNewAudio, forKey: "expandOnNewAudio") } }
 
     let media: MediaController
     let usage: ClaudeUsageStore
@@ -121,6 +124,7 @@ final class NotchViewModel: ObservableObject {
         hideFromScreenshots = UserDefaults.standard.bool(forKey: "hideFromScreenshots")
         openOnHover = UserDefaults.standard.object(forKey: "openOnHover") as? Bool ?? true
         mixerOnHover = UserDefaults.standard.object(forKey: "mixerOnHover") as? Bool ?? false
+        expandOnNewAudio = UserDefaults.standard.bool(forKey: "expandOnNewAudio")
         self.media = media
         self.usage = usage
         self.timer = timer
@@ -231,7 +235,7 @@ final class NotchViewModel: ObservableObject {
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] id in
-                guard id != nil else { return }
+                guard id != nil, self?.expandOnNewAudio == true else { return }
                 MainActor.assumeIsolated { self?.show(.nowPlaying) }
             }
             .store(in: &bag)
@@ -260,7 +264,8 @@ final class NotchViewModel: ObservableObject {
         if dictation.listening != nil { return 58 }
         if timer.isActive && isEnabled(.timer) { return 76 }
         if ticker.shows { return min(280, max(120, ticker.width)) }
-        return media.nowPlaying?.isPlaying == true && isEnabled(.media) ? 38 : 0
+        guard expandOnNewAudio, media.nowPlaying?.isPlaying == true, isEnabled(.media) else { return 0 }
+        return 38
     }
     var rightWing: CGFloat { (isEnabled(.claude) ? 30 : 0) + (awake.isOn ? 16 : 0) }
 

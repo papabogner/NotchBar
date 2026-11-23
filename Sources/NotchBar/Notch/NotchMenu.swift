@@ -147,6 +147,9 @@ enum NotchMenu {
             mixerHover.toolTip = "Off: hovering opens Home. On: hovering opens the Mixer. Click still follows what you tapped."
             menu.addItem(mixerHover)
         }
+        let peek = Item("Expand on New Audio", checked: vm.expandOnNewAudio) { vm.expandOnNewAudio.toggle() }
+        peek.toolTip = "Off: a new song or app does not drop a banner or widen the notch. Agent alerts are unchanged."
+        menu.addItem(peek)
         let replace = Item(hud.waitingForAccess ? "Replace System HUD (waiting for Accessibility)" : "Replace System HUD",
                            checked: hud.replaceSystemHUD) {
             hud.setReplaceSystemHUD(!hud.replaceSystemHUD)
