@@ -7,6 +7,8 @@ struct AppVolumeRow: Identifiable, Equatable {
     var level: Int
     var muted: Bool
     var playing: Bool
+    /// Name of a chosen output, when this app is not using the system default.
+    var outputLabel: String? = nil
 }
 
 /// The system output fader. This is the device volume, not a process tap.
@@ -18,8 +20,9 @@ struct MasterLevel: Equatable {
 
 /// Per-app volume. Nothing is tapped, and no audio behaviour changes, until the user opens the
 /// Mixer tab and moves a slider off 100% (or mutes). At 100% and unmuted the tap is removed, so
-/// that app plays exactly as it does without NotchBar. Levels are remembered per bundle ID, but
-/// they are not applied on the next launch until the user moves a slider again.
+/// that app plays exactly as it does without NotchBar. A chosen output device is the exception:
+/// it is remembered and applied, because the tap is what sends the app there. Other levels are
+/// remembered per bundle ID, but they are not applied on the next launch until a slider moves.
 @MainActor
 final class AppVolumeMixer: ObservableObject {
     @Published private(set) var rows: [AppVolumeRow] = []
@@ -43,6 +46,8 @@ final class AppVolumeMixer: ObservableObject {
     private let activity: AudioActivityMonitor
     private let isPreview: Bool
     private var saved: [String: SavedLevel] = [:]
+    /// Output device UID per bundle ID. Missing means the system default, and no tap at 100%.
+    private var routes: [String: String] = [:]
     private var explained: Bool
     /// Set for this launch once a slider actually asks for a tap. Not stored.
     private var engaged = false
@@ -65,6 +70,7 @@ final class AppVolumeMixer: ObservableObject {
     private static let explainedKey = "appVolumeExplained"
     private static let homeKey = "homeMixerCombined"
     private static let scenesKey = "mixerScenes"
+    private static let routesKey = "appOutputRoutes"
 
     private struct SceneSnapshot: Codable {
         var levels: [String: SavedLevel]
@@ -91,8 +97,14 @@ final class AppVolumeMixer: ObservableObject {
         }
         isPreview = false
         saved = Self.loadSaved()
+        routes = Self.loadRoutes()
         explained = UserDefaults.standard.bool(forKey: Self.explainedKey)
         combineOnHome = UserDefaults.standard.object(forKey: Self.homeKey) as? Bool ?? true
+        // A saved output has to be applied or the app keeps playing on the default device.
+        if !routes.isEmpty {
+            updateHooks()
+            syncTaps()
+        }
     }
 
     /// For the debug state.
@@ -262,9 +274,10 @@ final class AppVolumeMixer: ObservableObject {
         syncTaps()
     }
 
-    /// A tap is wanted only after the user has moved a slider this launch, and only off 100% or muted.
+    /// A tap is wanted after a slider moves off 100%, the app is muted, or it has its own output device.
     private var needsActiveTaps: Bool {
         if soloID != nil { return true }
+        if !routes.isEmpty { return true }
         return engaged && saved.contains { $0.value.muted || $0.value.level != 100 }
     }
 
@@ -279,7 +292,14 @@ final class AppVolumeMixer: ObservableObject {
                 guard level?.muted == true || (level?.level ?? 100) != 100 else { continue }
                 mixerLog.info("processes \(group.app.name, privacy: .public) \(self.activity.mixerProcessDetail(group.processObjects), privacy: .public)")
             }
-            engine().sync(saved: saved, groups: groups, permissionDenied: permissionDenied, solo: soloID)
+            var gone: [String] = []
+            engine().sync(saved: saved, groups: groups, permissionDenied: permissionDenied, solo: soloID, routes: routes) { gone.append($0) }
+            if !gone.isEmpty {
+                for id in gone { routes.removeValue(forKey: id) }
+                persistRoutes()
+                syncing = false
+                syncTaps()
+            }
         } else if #available(macOS 14.4, *) {
             (engineBox as? Engine)?.stopAll()
         }
@@ -348,17 +368,21 @@ final class AppVolumeMixer: ObservableObject {
 
     private func publishRows() {
         guard !isPreview else { return }
+        let devices = systemAudio.outputDevices()
         var next = activity.capableAudioApps().map { item -> AppVolumeRow in
             let level = saved[item.app.bundleID]
+            let label = routes[item.app.bundleID].flatMap { uid in devices.first { $0.uid == uid }?.name }
             return AppVolumeRow(id: item.app.bundleID, name: item.app.name,
-                                 level: level?.level ?? 100, muted: level?.muted ?? false, playing: item.playing)
+                                 level: level?.level ?? 100, muted: level?.muted ?? false, playing: item.playing,
+                                 outputLabel: label)
         }
         var seen = Set(next.map(\.id))
         for (id, level) in saved where !seen.contains(id) {
             guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: id).first,
                   running.activationPolicy == .regular else { continue }
+            let label = routes[id].flatMap { uid in devices.first { $0.uid == uid }?.name }
             next.append(AppVolumeRow(id: id, name: running.localizedName ?? id,
-                                      level: level.level, muted: level.muted, playing: false))
+                                      level: level.level, muted: level.muted, playing: false, outputLabel: label))
             seen.insert(id)
         }
         next.sort { lhs, rhs in
@@ -367,6 +391,50 @@ final class AppVolumeMixer: ObservableObject {
         }
         rows = next
         showSavedHint = isVisible && !engaged && rows.contains { $0.level != 100 || $0.muted }
+    }
+
+    func outputDevices() -> [AudioDeviceChoice] { systemAudio.outputDevices() }
+
+    /// Routes one app through a device macOS is exposing, including AirPlay. Nil returns it to the default.
+    func setAppOutput(_ bundleID: String, uid: String?) {
+        guard !isPreview else { return }
+        guard #available(macOS 14.4, *) else { return }
+        if uid != nil && !explained {
+            needsExplanation = true
+            return
+        }
+        if let uid {
+            routes[bundleID] = uid
+            engaged = true
+        } else {
+            routes.removeValue(forKey: bundleID)
+        }
+        persistRoutes()
+        statusMessage = nil
+        if #available(macOS 14.4, *) { (engineBox as? Engine)?.unsuppress(bundleID) }
+        publishRows()
+        updateHooks()
+        syncTaps()
+    }
+
+    /// Switches the system default output. This is the master strip, not a process tap.
+    func setSystemOutput(uid: String) {
+        guard !isPreview else { return }
+        systemAudio.setDefaultOutput(uid: uid)
+        refreshMaster()
+    }
+
+    private func persistRoutes() {
+        guard !isPreview else { return }
+        if routes.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.routesKey)
+        } else {
+            UserDefaults.standard.set(routes, forKey: Self.routesKey)
+        }
+    }
+
+    private static func loadRoutes() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: routesKey) as? [String: String] ?? [:]
     }
 
     private func persist() {
@@ -428,11 +496,12 @@ final class AppVolumeMixer: ObservableObject {
             self.onProblem = onProblem
         }
 
-        func sync(saved: [String: SavedLevel], groups: [PlayingProcessGroup], permissionDenied: Bool, solo: String?) {
+        func sync(saved: [String: SavedLevel], groups: [PlayingProcessGroup], permissionDenied: Bool, solo: String?,
+                  routes: [String: String], onDeviceGone: (String) -> Void) {
             var playing: [String: PlayingProcessGroup] = [:]
             for group in groups { playing[group.app.bundleID] = group }
             for id in Array(taps.keys) {
-                let keep = playing[id].map { wantsTap(id: id, level: saved[id], solo: solo) && !suppressed.contains(id) && taps[id]?.matches($0.processObjects) == true } ?? false
+                let keep = playing[id].map { wantsTap(id: id, level: saved[id], solo: solo, route: routes[id]) && !suppressed.contains(id) && taps[id]?.matches($0.processObjects, preferredUID: routes[id]) == true } ?? false
                 if !keep {
                     taps[id]?.stop()
                     taps.removeValue(forKey: id)
@@ -441,9 +510,9 @@ final class AppVolumeMixer: ObservableObject {
             guard !permissionDenied else { return }
             for group in groups {
                 let id = group.app.bundleID
-                guard wantsTap(id: id, level: saved[id], solo: solo), !suppressed.contains(id) else { continue }
+                guard wantsTap(id: id, level: saved[id], solo: solo, route: routes[id]), !suppressed.contains(id) else { continue }
                 let gain = gainValue(id: id, level: saved[id], solo: solo)
-                if let existing = taps[id], existing.matches(group.processObjects) {
+                if let existing = taps[id], existing.matches(group.processObjects, preferredUID: routes[id]) {
                     if existing.hasFault {
                         fail(id, permission: false, detail: "The audio callback failed.")
                     } else {
@@ -455,11 +524,15 @@ final class AppVolumeMixer: ObservableObject {
                 taps[id] = nil
                 let detail = "\(group.app.name) [\(group.processObjects.map(String.init).joined(separator: ","))]"
                 mixerLog.info("starting \(detail, privacy: .public) gain=\(gain, privacy: .public)")
-                switch ProcessVolumeTap.start(processObjects: group.processObjects, gain: gain, label: group.app.name) {
+                switch ProcessVolumeTap.start(processObjects: group.processObjects, gain: gain, label: group.app.name, outputUID: routes[id]) {
                 case .success(let tap):
                     taps[id] = tap
                     scheduleHealthCheck()
                 case .failure(let error):
+                    if case .deviceMissing = error {
+                        onDeviceGone(id)
+                        continue
+                    }
                     fail(id, permission: error.isPermission, detail: error.summary)
                     // One denial applies to every app. Don't open a tap on the next one.
                     if error.isPermission { return }
@@ -475,8 +548,9 @@ final class AppVolumeMixer: ObservableObject {
         func clearSuppression() { suppressed.removeAll() }
         func unsuppress(_ id: String) { suppressed.remove(id) }
 
-        private func wantsTap(id: String, level: SavedLevel?, solo: String?) -> Bool {
+        private func wantsTap(id: String, level: SavedLevel?, solo: String?, route: String?) -> Bool {
             if let solo, solo != id { return true }
+            if route != nil { return true }
             guard let level else { return false }
             return level.muted || level.level != 100
         }

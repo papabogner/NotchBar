@@ -36,7 +36,7 @@ struct MixerPanel: View {
     private var explanation: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Adjust each app's volume").font(.system(size: 14, weight: .semibold))
-            Text("NotchBar listens to an app only while its fader isn't at 100%, then plays it at that level. Audio isn't recorded or stored. macOS asks the next time you move a fader.")
+            Text("NotchBar listens to an app only while its fader isn't at 100%, it's muted, or you send it to another speaker. Audio isn't recorded or stored. macOS asks the next time that happens.")
                 .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
@@ -132,11 +132,21 @@ struct MasterStrip: View {
                 Image(systemName: mixer.master.muted ? "speaker.slash.fill" : "speaker.wave.3.fill")
                     .font(.system(size: compact ? 14 : 18, weight: .semibold))
             }
-            Text(mixer.master.name)
-                .font(.system(size: 10, weight: .semibold))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
+            Menu {
+                ForEach(mixer.outputDevices()) { device in
+                    Button(device.name) { mixer.setSystemOutput(uid: device.uid) }
+                }
+            } label: {
+                HStack(spacing: 2) {
+                    Text(mixer.master.name)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(2)
+                    Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                }
                 .frame(width: compact ? 56 : 68, height: 26, alignment: .top)
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: compact ? 56 : 68)
         }
         .padding(3)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(0.08)))
@@ -170,14 +180,30 @@ struct ChannelStrip: View {
             Text(mixer.soloID == row.id ? "Solo" : row.name)
                 .font(.system(size: 10, weight: highlighted || mixer.soloID == row.id ? .semibold : .medium))
                 .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .frame(width: compact ? 56 : 68, height: 26, alignment: .top)
+                .lineLimit(1)
+                .frame(width: compact ? 56 : 68)
+            outputMenu
+                .frame(width: compact ? 56 : 68, height: 14)
         }
         .padding(2)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
             .stroke(.white.opacity(highlighted ? 0.55 : 0), lineWidth: 1.5))
         .opacity(row.playing ? 1 : 0.45)
-        .help("\(row.name). Double-click for 100%. Option-click to solo.")
+        .help("\(row.name). Double-click for 100%. Option-click to solo. The chevron picks an output.")
+    }
+
+    private var outputMenu: some View {
+        Menu {
+            Button("System Default") { mixer.setAppOutput(row.id, uid: nil) }
+            ForEach(mixer.outputDevices()) { device in
+                Button(device.name) { mixer.setAppOutput(row.id, uid: device.uid) }
+            }
+        } label: {
+            Text(row.outputLabel ?? "Default")
+                .font(.system(size: 9))
+                .lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
     }
 
     @ViewBuilder private var icon: some View {

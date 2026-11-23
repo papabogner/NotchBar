@@ -10,6 +10,8 @@ let mixerLog = Logger(subsystem: "com.local.notchbar", category: "mixer")
 enum TapStartError: Error, Equatable {
     case permissionDenied(OSStatus)
     case failed(OSStatus, String)
+    /// The chosen output is no longer in the device list. The caller should use the default.
+    case deviceMissing
 
     var isPermission: Bool {
         if case .permissionDenied = self { return true }
@@ -23,6 +25,8 @@ enum TapStartError: Error, Equatable {
             return "System audio recording is off (\(Self.code(status))). Allow NotchBar in Privacy & Security > System Audio Recording, then move the slider again. Rebuilding asks again."
         case .failed(let status, let stage):
             return "\(stage) (\(Self.code(status)))."
+        case .deviceMissing:
+            return "That output device is no longer available."
         }
     }
 
@@ -46,6 +50,8 @@ enum TapStartError: Error, Equatable {
 @available(macOS 14.4, *)
 final class ProcessVolumeTap {
     let processObjects: [AudioObjectID]
+    /// Nil plays through the system default. A saved UID plays through that device.
+    let preferredUID: String?
     let label: String
     let createdAt = Date()
     /// Set on the main thread by the health check. The render callback never reads it.
@@ -58,9 +64,10 @@ final class ProcessVolumeTap {
     private var proc: AudioDeviceIOProcID?
     private var stopped = false
 
-    private init(processObjects: [AudioObjectID], label: String, context: UnsafeMutablePointer<TapContext>,
+    private init(processObjects: [AudioObjectID], preferredUID: String?, label: String, context: UnsafeMutablePointer<TapContext>,
                  aggregate: AudioObjectID, tap: AudioObjectID, proc: AudioDeviceIOProcID?) {
         self.processObjects = processObjects
+        self.preferredUID = preferredUID
         self.label = label
         self.context = context
         self.aggregate = aggregate
@@ -70,7 +77,9 @@ final class ProcessVolumeTap {
 
     deinit { stop() }
 
-    func matches(_ objects: [AudioObjectID]) -> Bool { processObjects == objects }
+    func matches(_ objects: [AudioObjectID], preferredUID: String?) -> Bool {
+        processObjects == objects && self.preferredUID == preferredUID
+    }
 
     /// Lock-free. Safe to call while the render callback is running.
     func setGain(_ gain: Float) {
@@ -117,11 +126,26 @@ final class ProcessVolumeTap {
     }
 
     /// Installs the tap and starts reading it. On any failure nothing is left running.
-    static func start(processObjects: [AudioObjectID], gain: Float, label: String) -> Result<ProcessVolumeTap, TapStartError> {
+    static func start(processObjects: [AudioObjectID], gain: Float, label: String, outputUID: String? = nil) -> Result<ProcessVolumeTap, TapStartError> {
         let objects = processObjects.sorted()
-        guard !objects.isEmpty, let output = defaultOutputRoute() else {
+        guard !objects.isEmpty else {
+            let error = TapStartError.failed(0, "No processes")
+            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public)")
+            return .failure(error)
+        }
+        let output: OutputRoute
+        if let outputUID {
+            guard let route = outputRoute(uid: outputUID) else {
+                let error = TapStartError.deviceMissing
+                mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public) uid=\(outputUID, privacy: .public)")
+                return .failure(error)
+            }
+            output = route
+        } else if let route = defaultOutputRoute() {
+            output = route
+        } else {
             let error = TapStartError.failed(0, "No default output")
-            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public) objects=\(objects.count, privacy: .public)")
+            mixerLog.error("tap \(label, privacy: .public) \(error.summary, privacy: .public)")
             return .failure(error)
         }
 
@@ -229,7 +253,7 @@ final class ProcessVolumeTap {
             return .failure(error)
         }
 
-        let tap = ProcessVolumeTap(processObjects: objects, label: label, context: context, aggregate: aggregate, tap: tapID, proc: proc)
+        let tap = ProcessVolumeTap(processObjects: objects, preferredUID: outputUID, label: label, context: context, aggregate: aggregate, tap: tapID, proc: proc)
         resources.abandon()
         mixerLog.info("tap started \(label, privacy: .public) gain=\(clamped, privacy: .public) output=\(output.uid, privacy: .public) objects=\(objects.map(String.init).joined(separator: ","), privacy: .public) inputChannels=\(totalInput, privacy: .public) tapOffset=\(tapOffset, privacy: .public) suppressedInput=\(suppressedInput, privacy: .public) drift=\(drift, privacy: .public)")
         return .success(tap)
@@ -485,6 +509,49 @@ private func defaultOutputRoute() -> OutputRoute? {
     _ = AudioObjectGetPropertyData(device, &transportAddress, 0, nil, &transportSize, &transport)
     let bluetooth = transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
     return OutputRoute(uid: uid, bluetooth: bluetooth)
+}
+
+/// An output the user picked, including an AirPlay device macOS is currently exposing.
+private func outputRoute(uid: String) -> OutputRoute? {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    let system = AudioObjectID(kAudioObjectSystemObject)
+    guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return nil }
+    let count = Int(size) / MemoryLayout<AudioDeviceID>.size
+    var ids = [AudioDeviceID](repeating: 0, count: count)
+    guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids) == noErr else { return nil }
+    for id in ids where deviceUID(id) == uid && hasOutputStreams(id) {
+        var transportAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var transport: UInt32 = 0
+        var transportSize = UInt32(MemoryLayout<UInt32>.size)
+        _ = AudioObjectGetPropertyData(id, &transportAddress, 0, nil, &transportSize, &transport)
+        let bluetooth = transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
+        return OutputRoute(uid: uid, bluetooth: bluetooth)
+    }
+    return nil
+}
+
+private func deviceUID(_ id: AudioDeviceID) -> String? {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyDeviceUID,
+        mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var value: Unmanaged<CFString>?
+    var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+    guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return nil }
+    return value?.takeRetainedValue() as String?
+}
+
+private func hasOutputStreams(_ id: AudioDeviceID) -> Bool {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyStreams,
+        mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(id, &address, 0, nil, &size) == noErr else { return false }
+    return size >= UInt32(MemoryLayout<AudioStreamID>.size)
 }
 
 @available(macOS 14.4, *)

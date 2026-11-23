@@ -127,5 +127,57 @@ final class SystemAudio {
         var m = UInt32(muted ? 1 : 0)
         AudioObjectSetPropertyData(device, &Self.muteAddress, 0, nil, 4, &m)
     }
+
+    /// Output devices Core Audio is exposing right now, including AirPlay.
+    func outputDevices() -> [AudioDeviceChoice] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        let count = Int(size) / MemoryLayout<AudioDeviceID>.size
+        var ids = [AudioDeviceID](repeating: 0, count: count)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids.compactMap { id in
+            guard Self.hasOutputStreams(id), let uid = Self.deviceUID(id), !uid.isEmpty else { return nil }
+            return AudioDeviceChoice(uid: uid, name: AudioOutput(device: id).name, objectID: id)
+        }
+    }
+
+    /// Makes one of `outputDevices()` the system default. The HUD hears it through the existing listener.
+    func setDefaultOutput(uid: String) {
+        guard let match = outputDevices().first(where: { $0.uid == uid }) else { return }
+        var id = match.objectID
+        let size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &Self.defaultDeviceAddress, 0, nil, size, &id)
+    }
+
+    private static func deviceUID(_ id: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return value?.takeRetainedValue() as String?
+    }
+
+    private static func hasOutputStreams(_ id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &address, 0, nil, &size) == noErr else { return false }
+        return size >= UInt32(MemoryLayout<AudioStreamID>.size)
+    }
+}
+
+/// One output the mixer can route to. `uid` is what gets saved.
+struct AudioDeviceChoice: Identifiable, Equatable {
+    var uid: String
+    var name: String
+    var objectID: AudioDeviceID
+    var id: String { uid }
 }
 
