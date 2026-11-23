@@ -53,6 +53,11 @@ struct CollapsedNotch: View {
             DictationWing(source: source).transition(.scale(scale: 0.5).combined(with: .opacity))
         } else if timer.isActive && vm.isEnabled(.timer) {
             TimerWing(timer: timer).transition(.scale(scale: 0.6).combined(with: .opacity))
+        } else if vm.ticker.shows, let line = vm.ticker.current {
+            Text(line).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 6)
+                .transition(.opacity)
         } else if playing && vm.banner != .nowPlaying {
             AudioWaves(isPlaying: true, color: Color(nsColor: media.accent), height: 13)
                 .transition(.scale(scale: 0.4).combined(with: .opacity))

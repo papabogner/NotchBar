@@ -70,6 +70,7 @@ enum NotchMenu {
 
     private static func addSystemItems(to menu: NSMenu, vm: NotchViewModel) {
         let hud = vm.hudService
+        addTickerItems(to: menu, vm: vm)
         menu.addItem(Item("Appearance…") {
             vm.showsAppearance = true
             vm.open(.home)
@@ -122,6 +123,14 @@ enum NotchMenu {
                 vm.showToast("Launch at Login needs the app in /Applications.")
             }
         })
+    }
+
+    private static func addTickerItems(to menu: NSMenu, vm: NotchViewModel) {
+        let ticker = vm.ticker
+        menu.addItem(Item("Show Ticker", checked: ticker.isEnabled) { ticker.isEnabled.toggle() })
+        menu.addItem(submenu("Ticker Sources", items: TickerStore.Source.allCases.map { source in
+            Item(source.title, checked: ticker.sources.contains(source)) { ticker.toggle(source) }
+        }))
     }
 
     private static func submenu(_ title: String, items: [NSMenuItem]) -> NSMenuItem {

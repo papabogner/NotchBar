@@ -87,6 +87,7 @@ final class NotchViewModel: ObservableObject {
     let volumes: AppVolumeMixer
     let homeLayout = HomeLayout()
     let appearance = NotchAppearance()
+    let ticker: TickerStore
     @Published var showsAppearance = false
     let camera = CameraGlance()
 
@@ -114,6 +115,7 @@ final class NotchViewModel: ObservableObject {
         self.hudService = hudService
         self.clipboard = clipboard
         self.calendar = calendar
+        ticker = TickerStore(media: media, calendar: calendar, usage: usage)
         enabledTabs = Self.loadEnabledTabs()
 
         // The closed notch's width depends on the timer and on playback, so redraw with them.
@@ -149,6 +151,7 @@ final class NotchViewModel: ObservableObject {
         mixer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         homeLayout.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         appearance.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        ticker.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
             .sink { [weak self] _, _, _ in self?.refreshMixerSurfaces() }
             .store(in: &bag)
@@ -191,6 +194,7 @@ final class NotchViewModel: ObservableObject {
     var leftWing: CGFloat {
         if dictation.listening != nil { return 58 }
         if timer.isActive && isEnabled(.timer) { return 76 }
+        if ticker.shows { return min(280, max(120, ticker.width)) }
         return media.nowPlaying?.isPlaying == true && isEnabled(.media) ? 38 : 0
     }
     var rightWing: CGFloat { isEnabled(.claude) ? 30 : 0 }
