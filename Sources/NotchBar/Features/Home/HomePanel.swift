@@ -11,6 +11,7 @@ struct HomePanel: View {
     @ObservedObject var weather: WeatherStore
     @ObservedObject var volumes: AppVolumeMixer
     @ObservedObject var layout: HomeLayout
+    @Environment(\.notchChrome) private var chrome
 
     var body: some View {
         Group {
@@ -25,7 +26,7 @@ struct HomePanel: View {
 
     /// Two columns that stay inside the panel: the song on the left, faders on the right.
     private var cardGrid: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: chrome.density.spacing) {
             HStack(alignment: .top, spacing: 16) {
                 if layout.isEnabled(.nowPlaying) {
                     nowPlayingColumn.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -61,14 +62,16 @@ struct HomePanel: View {
     private var nowPlayingColumn: some View {
         let accent = Color(nsColor: media.accent)
         let entry = media.nowPlaying
+        let playing = entry?.isPlaying == true
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 12) {
                 ArtworkView(image: media.artwork, size: 72, radius: 14, accent: accent, isAppIcon: media.artworkIsAppIcon)
+                    .shadow(color: playing ? accent.opacity(0.55) : .clear, radius: playing ? 14 : 0)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry?.title ?? "Not Playing")
-                        .font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                        .font(chrome.font(15, weight: .semibold)).lineLimit(2)
                     Text(entry?.artist ?? " ")
-                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                        .font(chrome.font(12)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
                 }
             }
             .contentShape(Rectangle())

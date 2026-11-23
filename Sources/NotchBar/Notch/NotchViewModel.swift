@@ -106,11 +106,11 @@ final class NotchViewModel: ObservableObject {
     @Published var showsMini = false
 
     /// A settings sheet with a text field is open, so the notch must keep the keyboard.
-    var acceptsText: Bool { showsSpotify || showsMini || showsTickerSettings }
+    var acceptsText: Bool { showsSpotify || showsMini || showsTickerSettings || showsAppearance }
     let camera = CameraGlance()
 
-    static let openSpring = Animation.spring(response: 0.42, dampingFraction: 0.76)
-    static let closeSpring = Animation.spring(response: 0.36, dampingFraction: 0.95)
+    static let openSpring = Animation.spring(response: 0.5, dampingFraction: 0.86)
+    static let closeSpring = Animation.spring(response: 0.42, dampingFraction: 0.92)
 
     private var bannerWork: DispatchWorkItem?
     private var toastWork: DispatchWorkItem?
@@ -278,7 +278,7 @@ final class NotchViewModel: ObservableObject {
     }
 
     var topRadius: CGFloat { isExpanded ? 16 : 6 }
-    var bottomRadius: CGFloat { isExpanded ? 30 : (banner == nil ? 10 : 20) }
+    var bottomRadius: CGFloat { isExpanded ? CGFloat(appearance.theme.cornerRadius) : (banner == nil ? 10 : 20) }
 
     var collapsedSize: CGSize { CGSize(width: geometry.notchWidth + leftWing + rightWing + 12, height: geometry.notchHeight) }
     var bannerSize: CGSize {

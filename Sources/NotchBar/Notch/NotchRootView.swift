@@ -31,8 +31,9 @@ struct NotchRootView: View {
         .frame(width: size.width, height: size.height, alignment: .top)
         .background(notchFill)
         .clipShape(NotchShape(topRadius: vm.topRadius, bottomRadius: vm.bottomRadius))
-        .shadow(color: glow, radius: vm.isExpanded && theme.preset == .neon ? 18 : 16, y: 8)
+        .shadow(color: glow, radius: vm.isExpanded && theme.glow ? 22 : 16, y: 8)
         .environment(\.notchChrome, theme)
+        .font(theme.font(13))
         .contentShape(NotchShape(topRadius: vm.topRadius, bottomRadius: vm.bottomRadius))
         .offset(x: vm.shapeOffset)
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: vm.leftWing)
@@ -42,23 +43,34 @@ struct NotchRootView: View {
         vm.appearance.displayed(album: media.artwork?.vibrantAverageColor)
     }
 
-    /// Closed stays black. Glass uses the system material only while the notch is open.
+    /// Closed, and the band that meets the hardware, stay black. Glass is only the expanded body.
     @ViewBuilder private var notchFill: some View {
         if !vm.isExpanded {
             Color.black
-        } else if theme.preset == .glass {
-            Rectangle().fill(.ultraThinMaterial)
-        } else if theme.preset == .classic {
-            Color.black
         } else {
-            LinearGradient(colors: [theme.background, theme.backgroundEnd],
-                           startPoint: angleStart, endPoint: angleEnd)
+            VStack(spacing: 0) {
+                Color.black.frame(height: vm.geometry.notchHeight)
+                expandedBody
+            }
+        }
+    }
+
+    @ViewBuilder private var expandedBody: some View {
+        switch theme.backgroundStyle {
+        case .black:
+            Color.black
+        case .glass:
+            NotchSystemGlass(tint: nil, intensity: theme.glassIntensity)
+        case .tintedGlass:
+            NotchSystemGlass(tint: theme.tint, intensity: theme.glassIntensity)
+        case .gradient:
+            LinearGradient(colors: [theme.background, theme.backgroundEnd], startPoint: angleStart, endPoint: angleEnd)
         }
     }
 
     private var glow: Color {
-        if vm.isExpanded && theme.preset == .neon { return theme.accent.opacity(0.85) }
-        return .black.opacity(vm.isExpanded || vm.banner != nil ? 0.55 : 0)
+        if vm.isExpanded && theme.glow { return theme.accent.opacity(0.55 + theme.glassIntensity * 0.3) }
+        return .black.opacity(vm.isExpanded || vm.banner != nil ? 0.45 : 0)
     }
 
     private var angleStart: UnitPoint {

@@ -263,13 +263,14 @@ private struct PillFader<Icon: View>: View {
             let fraction = CGFloat(min(maxLevel, max(0, level))) / CGFloat(max(maxLevel, 1))
             let fill = muted ? 0 : g.size.height * fraction
             ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: chrome.faderCorner, style: .continuous).fill(.white.opacity(0.14))
+                RoundedRectangle(cornerRadius: chrome.faderCorner, style: .continuous).fill(.white.opacity(0.1))
                 RoundedRectangle(cornerRadius: chrome.faderCorner, style: .continuous)
-                    .fill((chrome.preset == .neon ? chrome.accent : .white).opacity(muted ? 0.28 : 0.92))
+                    .fill(chrome.accent.opacity(muted ? 0.28 : 0.92))
                     .frame(height: max(0, fill))
+                    .shadow(color: chrome.glow ? chrome.accent.opacity(0.45) : .clear, radius: 6, y: -2)
                 VStack(spacing: 0) {
                     Text(muted ? "Off" : "\(level)")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                        .font(chrome.font(chrome.faderStyle == .line ? 11 : 13, weight: .semibold))
                         .foregroundStyle(muted || fraction < 0.72 ? .white : .black)
                         .padding(.top, 8)
                     Spacer(minLength: 0)
@@ -312,7 +313,7 @@ private struct PillFader<Icon: View>: View {
             .accessibilityLabel("Volume")
         }
         .frame(maxHeight: .infinity)
-        .frame(width: width + 8)
+        .frame(width: (width + 8) * chrome.faderWidthScale)
     }
 }
 

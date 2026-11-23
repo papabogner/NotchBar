@@ -48,8 +48,8 @@ final class NotchController {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.expansionChanged(expanded) } }
         }
         .store(in: &observers)
-        Publishers.CombineLatest3(vm.$showsSpotify, vm.$showsMini, vm.$showsTickerSettings)
-            .map { $0 || $1 || $2 }
+        Publishers.CombineLatest4(vm.$showsSpotify, vm.$showsMini, vm.$showsTickerSettings, vm.$showsAppearance)
+            .map { $0 || $1 || $2 || $3 }
             .removeDuplicates()
             .sink { [weak self] typing in
                 MainActor.assumeIsolated { self?.setTyping(typing) }

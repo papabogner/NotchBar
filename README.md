@@ -119,7 +119,7 @@ Banners drop from the notch for a moment, then tuck back in.
 - **Tidy menu bar.** **… > Tidy Menu Bar Icons** tucks icons you rarely use behind a chevron, so the ones you need fit beside the notch. ⌘-drag an icon right of the thin divider to keep it visible.
 - **Lock Screen** and battery level in the header.
 - **Show only what you use.** Hide any tab from **… > Show Tabs**, and turn off banners you don't want from the same menu.
-- **Appearance.** **… > Appearance** picks Classic, Glass, Neon, Console, or a custom color and gradient. Album colors follow the artwork. The closed notch stays black.
+- **Appearance.** **… > Appearance…** is a live sheet: Black, Glass, Tinted Glass, or Gradient, an accent, type, size, corners, density, and fader shape. Presets are Midnight, Liquid Glass, Neon, Paper, and Pabo. Glass uses the system glass effect on macOS 26 and a blurred panel on earlier systems. The band that meets the hardware stays black.
 - **Global Hotkeys.** Off until **… > Global Hotkeys**. Then ⌃⌥N opens or closes the notch, ⌃⌥M mutes the system output, and ⌃⌥S recalls the next saved scene.
 - **Keep Awake.** **… > Keep Awake** holds an idle-sleep assertion. A cup icon shows in the notch while it is on. The display can still dim.
 - **File Shelf.** Off until **… > File Shelf**. Drop files on the open notch to park them, click one to show it in Finder, or drag it back out.

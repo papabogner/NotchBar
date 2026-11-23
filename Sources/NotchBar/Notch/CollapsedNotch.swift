@@ -3,6 +3,7 @@ import SwiftUI
 /// The closed notch: a status on each side of the camera, and an optional banner below.
 struct CollapsedNotch: View {
     @ObservedObject var vm: NotchViewModel
+    @Environment(\.notchChrome) private var chrome
     @ObservedObject var media: MediaController
     @ObservedObject var usage: ClaudeUsageStore
     @ObservedObject var timer: TimerModel
@@ -62,7 +63,7 @@ struct CollapsedNotch: View {
         } else if timer.isActive && vm.isEnabled(.timer) {
             TimerWing(timer: timer).transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if vm.ticker.shows, let line = vm.ticker.current {
-            Text(line).font(.system(size: 11, weight: .medium)).lineLimit(1)
+            Text(line).font(chrome.font(11, weight: .medium)).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 6)
                 .transition(.opacity)
