@@ -121,6 +121,7 @@ Banners drop from the notch for a moment, then tuck back in.
 - **Show only what you use.** Hide any tab from **… > Show Tabs**, and turn off banners you don't want from the same menu.
 - **Appearance.** **… > Appearance** picks Classic, Glass, Neon, Console, or a custom color and gradient. Album colors follow the artwork. The closed notch stays black.
 - **Global Hotkeys.** Off until **… > Global Hotkeys**. Then ⌃⌥N opens or closes the notch, ⌃⌥M mutes the system output, and ⌃⌥S recalls the next saved scene.
+- **Keep Awake.** **… > Keep Awake** holds an idle-sleep assertion. A cup icon shows in the notch while it is on. The display can still dim.
 
 </details>
 

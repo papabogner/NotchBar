@@ -27,7 +27,15 @@ struct CollapsedNotch: View {
                     .onTapGesture { vm.open(vm.preferredTab) }
 
                 ZStack {
-                    if vm.isEnabled(.claude) { LiveClaudeLogo(usage: usage, size: 13) }
+                    HStack(spacing: 3) {
+                        if vm.awake.isOn {
+                            Image(systemName: "cup.and.saucer.fill")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .help("Keeping this Mac awake")
+                        }
+                        if vm.isEnabled(.claude) { LiveClaudeLogo(usage: usage, size: 13) }
+                    }
                 }
                 .frame(width: balanced ?? vm.rightWing)
                 .frame(maxWidth: vm.isHovering ? .infinity : nil, maxHeight: .infinity)

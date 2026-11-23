@@ -91,6 +91,12 @@ struct ExpandedNotch: View {
             Spacer(minLength: vm.geometry.notchWidth + 16)
 
             HStack(spacing: 7) {
+                if vm.awake.isOn {
+                    Image(systemName: "cup.and.saucer.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .help("Keeping this Mac awake")
+                }
                 CameraButton(isOn: vm.showsCamera) { vm.toggleCamera() }
                 BatteryIndicator()
                 CircleIconButton(systemName: "lock.fill", size: 24, iconSize: 10.5, help: "Lock Screen") {

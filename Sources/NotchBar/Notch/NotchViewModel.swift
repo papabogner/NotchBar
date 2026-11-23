@@ -92,6 +92,7 @@ final class NotchViewModel: ObservableObject {
     let ticker: TickerStore
     let agents = AgentMonitor()
     let hotkeys = HotkeyController()
+    let awake = AwakeKeeper()
     @Published var showsAppearance = false
     @Published var showsTickerSettings = false
     let camera = CameraGlance()
@@ -140,6 +141,7 @@ final class NotchViewModel: ObservableObject {
         hotkeys.onMute = { [weak self] in self?.volumes.toggleMasterMute() }
         hotkeys.onScene = { [weak self] in self?.volumes.cycleScene() }
         hotkeys.installIfNeeded()
+        awake.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
 
         // The closed notch's width depends on the timer and on playback, so redraw with them.
         timer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
@@ -229,7 +231,7 @@ final class NotchViewModel: ObservableObject {
         if ticker.shows { return min(280, max(120, ticker.width)) }
         return media.nowPlaying?.isPlaying == true && isEnabled(.media) ? 38 : 0
     }
-    var rightWing: CGFloat { isEnabled(.claude) ? 30 : 0 }
+    var rightWing: CGFloat { (isEnabled(.claude) ? 30 : 0) + (awake.isOn ? 16 : 0) }
 
     /// Moves a lopsided closed notch so it stays anchored to the camera housing.
     var shapeOffset: CGFloat {
