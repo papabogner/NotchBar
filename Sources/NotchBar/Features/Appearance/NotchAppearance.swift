@@ -123,15 +123,3 @@ extension EnvironmentValues {
         set { self[NotchChromeKey.self] = newValue }
     }
 }
-
-struct NotchMaterial: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}

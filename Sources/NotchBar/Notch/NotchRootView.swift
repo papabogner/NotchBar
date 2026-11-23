@@ -47,7 +47,7 @@ struct NotchRootView: View {
         if !vm.isExpanded {
             Color.black
         } else if theme.preset == .glass {
-            NotchMaterial()
+            Rectangle().fill(.ultraThinMaterial)
         } else if theme.preset == .classic {
             Color.black
         } else {
