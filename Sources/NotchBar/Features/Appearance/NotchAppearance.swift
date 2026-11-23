@@ -184,6 +184,10 @@ final class NotchAppearance: ObservableObject {
             .system(size: size * textSize.scale, weight: weight, design: fontChoice.design)
         }
 
+        private enum CodingKeys: String, CodingKey {
+            case preset, accentR, accentG, accentB, bgR, bgG, bgB, bg2R, bg2G, bg2B, angle, albumColors, backgroundStyle, tintR, tintG, tintB, fontChoice, textSize, cornerRadius, density, glassIntensity, faderStyle, glow
+        }
+
         init() {}
 
         init(from decoder: Decoder) throws {
