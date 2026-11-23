@@ -98,7 +98,7 @@ final class NotchAppearance: ObservableObject {
         var cornerRadius = 30.0
         var density: Density = .comfortable
         var glassIntensity = 0.8
-        var faderStyle: FaderStyle = .pill
+        var faderStyle: FaderStyle = .line
         var glow = false
 
         static let classic = Theme()
@@ -209,7 +209,7 @@ final class NotchAppearance: ObservableObject {
             cornerRadius = try keys.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? (preset == .console ? 16 : 30)
             density = try keys.decodeIfPresent(Density.self, forKey: .density) ?? .comfortable
             glassIntensity = try keys.decodeIfPresent(Double.self, forKey: .glassIntensity) ?? 0.8
-            faderStyle = try keys.decodeIfPresent(FaderStyle.self, forKey: .faderStyle) ?? (preset == .neon ? .line : .pill)
+            faderStyle = try keys.decodeIfPresent(FaderStyle.self, forKey: .faderStyle) ?? .line
             glow = try keys.decodeIfPresent(Bool.self, forKey: .glow) ?? (preset == .neon)
             tintR = try keys.decodeIfPresent(Double.self, forKey: .tintR) ?? 0.55
             tintG = try keys.decodeIfPresent(Double.self, forKey: .tintG) ?? 0.72

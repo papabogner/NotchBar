@@ -94,7 +94,15 @@ Banners drop from the notch for a moment, then tuck back in.
 
 **Home.** The notch opens here. The song sits on the left; System and the apps that are playing sit on the right as equal faders. If Core Audio has not marked an app yet, the Now Playing app is shown instead. Weather is a small chip. Claude, an agent, or a timer is one line when there is something to say. **… > Customize Home** turns cards on and reorders them. **… > Mixer on Hover** is off, so hover opens Home; turn it on to open the Mixer instead.
 
-**Ticker.** **… > Show Ticker** is off until you turn it on. It then rotates now playing, the next event, Claude, agents, a line you type, a feed URL, or crypto prices beside the closed notch, and hides in fullscreen.
+**Ticker.** Off until you turn it on in **Einstellungen → Ticker**. Sources are separate switches. **Dieser Mac** writes short German lines (an agent working, the app you have focused, new downloads, the Mac mini, a low battery, what is playing). Drop extra lines in as JSON files in `~/Library/Application Support/NotchBar/ticker/`:
+
+```json
+{"items":[{"text":"Build fertig: NotchBar.app","source":"build","priority":60,"url":"https://example.com","expires":"2026-11-24T18:00:00Z"}]}
+```
+
+**Nachrichten** reads the RSS list (ORF, Tagesschau, Reuters world, Hacker News) every five minutes. Headlines under 30 minutes old are marked BREAKING. A click opens the link. **X** stays hidden until a bearer token is saved in the Keychain from that same pane. The default search is `(breaking OR eilmeldung) -is:retweet lang:de OR lang:en`, polled about every five minutes, and only posts with a little engagement are shown.
+
+**Einstellungen…** (also ⌘, while NotchBar is active) holds the switches that used to live in the … menu. The notch menu keeps Einstellungen, Mixer on Hover, Keep Awake, and Quit.
 
 </td></tr>
 <tr><td>

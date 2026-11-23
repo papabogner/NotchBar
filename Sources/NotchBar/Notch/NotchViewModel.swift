@@ -100,6 +100,8 @@ final class NotchViewModel: ObservableObject {
     let spotify = SpotifyConnect()
     let mini = MiniStatus()
     let portfolio = PortfolioStore()
+    let macTicker: MacTicker
+    let newsTicker = NewsTicker()
     @Published var showsAppearance = false
     @Published var showsTickerSettings = false
     @Published var showsSpotify = false
@@ -135,6 +137,7 @@ final class NotchViewModel: ObservableObject {
         self.clipboard = clipboard
         self.calendar = calendar
         ticker = TickerStore(media: media, calendar: calendar, usage: usage)
+        macTicker = MacTicker(mini: mini, media: media)
         enabledTabs = Self.loadEnabledTabs()
         // Every stored property is set. Closures below may capture self.
         clipboard.isEnabled = isEnabled(.clipboard)
@@ -171,6 +174,10 @@ final class NotchViewModel: ObservableObject {
         spotify.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         mini.onUpdate = { [weak self] in self?.ticker.miniLine = self?.mini.line ?? "" }
         portfolio.onUpdate = { [weak self] in self?.ticker.portfolioLine = self?.portfolio.pulse?.line ?? "" }
+        macTicker.onItems = { [weak self] items in self?.ticker.macItems = items }
+        newsTicker.onNews = { [weak self] items in self?.ticker.newsItems = items }
+        newsTicker.onPosts = { [weak self] items in self?.ticker.postItems = items }
+        newsTicker.objectWillChange.sink { [weak self] _ in self?.updateAgentWatch() }.store(in: &bag)
         portfolio.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
             self?.updateAgentWatch()
@@ -334,7 +341,7 @@ final class NotchViewModel: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let wants = (self.isExpanded && self.tab == .home && self.homeLayout.isEnabled(.agents))
+                let wants = (self.isExpanded && self.tab == .home)
                     || (self.ticker.isEnabled && self.ticker.sources.contains(.agents))
                 self.agents.setActive(wants)
                 let miniHome = self.isExpanded && self.tab == .home && self.mini.isEnabled
@@ -343,6 +350,10 @@ final class NotchViewModel: ObservableObject {
                 let bookHome = self.isExpanded && self.tab == .home && self.portfolio.isEnabled
                 let bookTicker = self.ticker.isEnabled && self.ticker.sources.contains(.portfolio) && self.portfolio.isEnabled
                 self.portfolio.setWatching(bookHome || bookTicker)
+                let tickerOn = self.ticker.isEnabled
+                self.macTicker.setActive(tickerOn && self.ticker.sources.contains(.thisMac))
+                self.newsTicker.setActive(news: tickerOn && self.ticker.sources.contains(.news),
+                                           x: tickerOn && self.ticker.sources.contains(.x))
             }
         }
     }
@@ -382,6 +393,10 @@ final class NotchViewModel: ObservableObject {
     /// The header's camera button: a quick look in the camera, or back to the tab.
     func toggleCamera() {
         withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) { showsCamera.toggle() }
+    }
+
+    func showSettings() {
+        SettingsWindow.show(vm: self)
     }
 
     func close() {

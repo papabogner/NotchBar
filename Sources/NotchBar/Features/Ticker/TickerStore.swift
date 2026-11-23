@@ -1,10 +1,27 @@
 import AppKit
 
+/// One rotating ticker line. `url` opens when the line is clicked.
+struct TickerLine: Identifiable, Equatable {
+    var id: String
+    var text: String
+    var url: URL?
+    var priority: Int
+    var breaking: Bool
+
+    init(id: String, text: String, url: URL? = nil, priority: Int = 0, breaking: Bool = false) {
+        self.id = id
+        self.text = text
+        self.url = url
+        self.priority = priority
+        self.breaking = breaking
+    }
+}
+
 /// Rotating lines beside the closed notch. Off until the user turns it on.
 @MainActor
 final class TickerStore: ObservableObject {
     enum Source: String, CaseIterable, Identifiable, Codable {
-        case nowPlaying, calendar, claude, agents, custom, feed, crypto, mini, portfolio
+        case nowPlaying, calendar, claude, agents, custom, feed, crypto, mini, portfolio, thisMac, news, x
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -17,6 +34,9 @@ final class TickerStore: ObservableObject {
             case .crypto: return "Crypto"
             case .mini: return "Mac mini"
             case .portfolio: return "Portfolio"
+            case .thisMac: return "This Mac"
+            case .news: return "News"
+            case .x: return "X"
             }
         }
     }
@@ -42,6 +62,9 @@ final class TickerStore: ObservableObject {
     @Published var miniLine: String = ""
     /// Filled by the portfolio total when that ticker source is on.
     @Published var portfolioLine: String = ""
+    @Published var macItems: [TickerLine] = []
+    @Published var newsItems: [TickerLine] = []
+    @Published var postItems: [TickerLine] = []
     @Published private(set) var menuBarHidden = false
 
     private let media: MediaController
@@ -83,34 +106,44 @@ final class TickerStore: ObservableObject {
     }
 
     var shows: Bool { isEnabled && !menuBarHidden && current != nil }
-    var current: String? {
+    var current: TickerLine? {
         let lines = linesNow()
         guard !lines.isEmpty else { return nil }
         return lines[index % lines.count]
+    }
+
+    func openCurrent() {
+        guard let url = current?.url else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func toggle(_ source: Source) {
         if sources.contains(source) { sources.remove(source) } else { sources.insert(source) }
     }
 
-    private func linesNow() -> [String] {
-        var lines: [String] = []
+    private func linesNow() -> [TickerLine] {
+        var lines: [TickerLine] = []
+        if sources.contains(.thisMac) { lines.append(contentsOf: macItems) }
+        if sources.contains(.news) { lines.append(contentsOf: newsItems) }
+        if sources.contains(.x) { lines.append(contentsOf: postItems) }
         if sources.contains(.nowPlaying), let entry = media.nowPlaying, entry.isPlaying {
-            lines.append("\(entry.title) · \(entry.artist)")
+            lines.append(TickerLine(id: "np", text: "\(entry.title) · \(entry.artist)", priority: 20))
         }
         if sources.contains(.calendar), let event = calendar.upcoming.first {
-            lines.append(event.title)
+            lines.append(TickerLine(id: "cal", text: event.title, priority: 30))
         }
         if sources.contains(.claude) {
-            lines.append("Claude \(Int((usage.sessionFraction * 100).rounded()))%")
+            lines.append(TickerLine(id: "claude", text: "Claude \(Int((usage.sessionFraction * 100).rounded()))%", priority: 15))
         }
-        if sources.contains(.agents), !agentLine.isEmpty { lines.append(agentLine) }
-        if sources.contains(.mini), !miniLine.isEmpty { lines.append(miniLine) }
-        if sources.contains(.portfolio), !portfolioLine.isEmpty { lines.append(portfolioLine) }
-        if sources.contains(.custom), !customText.isEmpty { lines.append(customText) }
-        if sources.contains(.feed) { lines.append(contentsOf: feedLines.prefix(5)) }
-        if sources.contains(.crypto), !cryptoLine.isEmpty { lines.append(cryptoLine) }
-        return lines
+        if sources.contains(.agents), !agentLine.isEmpty { lines.append(TickerLine(id: "agent", text: agentLine, priority: 50)) }
+        if sources.contains(.mini), !miniLine.isEmpty { lines.append(TickerLine(id: "mini", text: miniLine, priority: 40)) }
+        if sources.contains(.portfolio), !portfolioLine.isEmpty { lines.append(TickerLine(id: "book", text: portfolioLine, priority: 35)) }
+        if sources.contains(.custom), !customText.isEmpty { lines.append(TickerLine(id: "custom", text: customText, priority: 10)) }
+        if sources.contains(.feed) {
+            lines.append(contentsOf: feedLines.prefix(5).enumerated().map { TickerLine(id: "feed-\($0.offset)", text: $0.element, priority: 12) })
+        }
+        if sources.contains(.crypto), !cryptoLine.isEmpty { lines.append(TickerLine(id: "crypto", text: cryptoLine, priority: 8)) }
+        return Array(lines.sorted { $0.priority > $1.priority }.prefix(12))
     }
 
     private func reschedule() {

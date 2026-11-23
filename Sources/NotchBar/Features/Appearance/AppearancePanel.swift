@@ -4,6 +4,7 @@ import SwiftUI
 struct AppearancePanel: View {
     @ObservedObject var appearance: NotchAppearance
     var close: () -> Void
+    var embedded = false
 
     private static let swatches: [Color] = [
         .white, Color(red: 0.75, green: 0.88, blue: 1), Color(red: 0.2, green: 1, blue: 0.65),
@@ -18,11 +19,13 @@ struct AppearancePanel: View {
         let theme = appearance.theme
         ScrollView {
             VStack(alignment: .leading, spacing: theme.density.spacing + 6) {
-                HStack {
-                    Text("Appearance").font(theme.font(15, weight: .semibold))
-                    Spacer()
-                    Button("Done", action: close).buttonStyle(PressableStyle(scale: 0.96))
-                        .font(theme.font(12, weight: .semibold))
+                if !embedded {
+                    HStack {
+                        Text("Appearance").font(theme.font(15, weight: .semibold))
+                        Spacer()
+                        Button("Done", action: close).buttonStyle(PressableStyle(scale: 0.96))
+                            .font(theme.font(12, weight: .semibold))
+                    }
                 }
                 Text("Presets").font(theme.font(11, weight: .semibold)).foregroundStyle(.white.opacity(0.5))
                 HStack(spacing: 6) {

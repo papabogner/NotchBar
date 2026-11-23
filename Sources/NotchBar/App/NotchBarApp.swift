@@ -58,11 +58,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         weather.start()
         dictation.start()
         MenuBarOrganizer.shared.start()
+        let settingsItem = NSMenuItem(title: "Einstellungen…", action: #selector(showSettings(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        NSApp.mainMenu?.addItem(settingsItem)
 
         // ⌃⌘V. ⌘⇧V is avoided because many apps use it for Paste and Match Style.
         clipboardShortcut = HotKey(keyCode: 9, modifiers: 0x0100 | 0x1000, id: 1) { [weak vm] in
             MainActor.assumeIsolated { vm?.toggleClipboard() }
         }
+    }
+
+    @objc func showSettings(_ sender: Any?) {
+        controller?.showSettings()
     }
 }
 

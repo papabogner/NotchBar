@@ -262,28 +262,34 @@ private struct PillFader<Icon: View>: View {
         GeometryReader { g in
             let fraction = CGFloat(min(maxLevel, max(0, level))) / CGFloat(max(maxLevel, 1))
             let fill = muted ? 0 : g.size.height * fraction
+            let track: CGFloat = chrome.faderStyle == .line ? 4 : (chrome.faderStyle == .pill ? 6 : 8)
             ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: chrome.faderCorner, style: .continuous).fill(.white.opacity(0.1))
-                RoundedRectangle(cornerRadius: chrome.faderCorner, style: .continuous)
-                    .fill(chrome.accent.opacity(muted ? 0.28 : 0.92))
-                    .frame(height: max(0, fill))
-                    .shadow(color: chrome.glow ? chrome.accent.opacity(0.45) : .clear, radius: 6, y: -2)
+                RoundedRectangle(cornerRadius: track / 2, style: .continuous)
+                    .fill(.white.opacity(0.16))
+                    .frame(width: track, height: g.size.height)
+                RoundedRectangle(cornerRadius: track / 2, style: .continuous)
+                    .fill(chrome.accent.opacity(muted ? 0.35 : 0.95))
+                    .frame(width: track, height: max(track, fill))
+                if chrome.faderStyle != .line {
+                    Circle().fill(.white)
+                        .frame(width: 7, height: 7)
+                        .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+                        .offset(y: -max(0, fill - 4))
+                }
                 VStack(spacing: 0) {
                     Text(muted ? "Off" : "\(level)")
-                        .font(chrome.font(chrome.faderStyle == .line ? 11 : 13, weight: .semibold))
-                        .foregroundStyle(muted || fraction < 0.72 ? .white : .black)
-                        .padding(.top, 8)
+                        .font(chrome.font(11, weight: .semibold))
+                        .foregroundStyle(.white)
                     Spacer(minLength: 0)
                     Button(action: onMute) {
-                        icon.foregroundStyle(muted || fraction < 0.22 ? .white.opacity(0.9) : .black.opacity(0.85))
-                            .frame(width: 28, height: 28)
+                        icon.foregroundStyle(.white.opacity(0.9))
+                            .frame(width: 22, height: 22)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(PressableStyle(scale: 0.9))
-                    .padding(.bottom, 8)
                 }
             }
-            .frame(width: width, height: g.size.height)
+            .frame(width: max(width * 0.55, 28), height: g.size.height)
             .frame(maxWidth: .infinity)
             .scaleEffect(dragging ? 1.04 : 1)
             .animation(.spring(response: 0.28, dampingFraction: 0.72), value: dragging)

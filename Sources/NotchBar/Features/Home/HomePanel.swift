@@ -12,6 +12,7 @@ struct HomePanel: View {
     @ObservedObject var volumes: AppVolumeMixer
     @ObservedObject var layout: HomeLayout
     @Environment(\.notchChrome) private var chrome
+    @ObservedObject private var battery = BatteryMonitor.shared
 
     var body: some View {
         Group {
@@ -26,9 +27,9 @@ struct HomePanel: View {
 
     /// Two columns that stay inside the panel: the song on the left, faders on the right.
     private var cardGrid: some View {
-        VStack(alignment: .leading, spacing: chrome.density.spacing) {
-            HStack(alignment: .top, spacing: 16) {
-                if layout.isEnabled(.nowPlaying) {
+        VStack(alignment: .leading, spacing: chrome.density.spacing + 4) {
+            HStack(alignment: .top, spacing: 18) {
+                if layout.isEnabled(.nowPlaying), media.nowPlaying?.isPlaying == true {
                     nowPlayingColumn.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 if layout.isEnabled(.mixer), vm.isEnabled(.mixer) {
@@ -36,27 +37,59 @@ struct HomePanel: View {
                 }
             }
             .frame(maxHeight: .infinity)
-            if vm.mini.isEnabled || vm.portfolio.isEnabled || statusLine != nil {
-                HStack(spacing: 8) {
-                    if vm.mini.isEnabled {
-                        Circle().fill(vm.mini.report.online ? Color.green : Color.orange).frame(width: 6, height: 6)
-                        Text(vm.mini.line).lineLimit(1)
-                    }
-                    if vm.portfolio.isEnabled, let pulse = vm.portfolio.pulse {
-                        Text(pulse.totalText).lineLimit(1)
-                        Text(pulse.changeText).lineLimit(1)
-                            .foregroundStyle(pulse.isUp ? Color.green : Color.red)
-                        if !pulse.top.isEmpty { Text(pulse.top).lineLimit(1).foregroundStyle(.white.opacity(0.55)) }
-                    }
-                    if let line = statusLine {
-                        Text(line).lineLimit(1)
-                    }
+            if showsStatus {
+                statusRow
+            }
+            if vm.ticker.isEnabled, let line = vm.ticker.current {
+                Button {
+                    vm.ticker.openCurrent()
+                } label: {
+                    Text(line.text).font(chrome.font(12, weight: line.breaking ? .semibold : .medium)).lineLimit(1)
+                        .foregroundStyle(line.breaking ? chrome.accent : .white.opacity(0.8))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.72))
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .buttonStyle(PressableStyle(scale: 0.99))
             }
         }
+    }
+
+    private var showsStatus: Bool {
+        !vm.agents.sessions.isEmpty || vm.mini.isEnabled || (vm.portfolio.isEnabled && vm.portfolio.pulse != nil)
+            || battery.percent != nil || (layout.isEnabled(.weather) && weather.weather != nil)
+            || soonEvent != nil
+    }
+
+    private var statusRow: some View {
+        HStack(spacing: 10) {
+            ForEach(vm.agents.sessions.prefix(2)) { session in
+                HStack(spacing: 4) {
+                    Circle().fill(session.state == .working ? Color.green : Color.orange).frame(width: 6, height: 6)
+                    Text(session.tool).lineLimit(1)
+                }
+            }
+            if vm.mini.isEnabled {
+                HStack(spacing: 4) {
+                    Circle().fill(vm.mini.report.online ? Color.green : Color.orange).frame(width: 6, height: 6)
+                    Text("mini").lineLimit(1)
+                }
+            }
+            if vm.portfolio.isEnabled, let pulse = vm.portfolio.pulse {
+                Text(pulse.totalText).lineLimit(1)
+                Text(pulse.changeText).lineLimit(1).foregroundStyle(pulse.isUp ? Color.green : Color.red)
+            }
+            if let percent = battery.percent {
+                Text("\(percent)%").foregroundStyle(percent <= 20 && !battery.charging ? Color.red : .white.opacity(0.7))
+            }
+            if layout.isEnabled(.weather), weather.access == .on, let report = weather.weather {
+                Text("\(report.temperature)°").lineLimit(1)
+            }
+            if layout.isEnabled(.upNext), let event = soonEvent {
+                Text(event.title).lineLimit(1).foregroundStyle(.white.opacity(0.7))
+            }
+            Spacer(minLength: 0)
+        }
+        .font(chrome.font(11, weight: .medium))
+        .foregroundStyle(.white.opacity(0.82))
     }
 
     private var nowPlayingColumn: some View {

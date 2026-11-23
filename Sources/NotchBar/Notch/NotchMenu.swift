@@ -20,29 +20,11 @@ enum NotchMenu {
     }
 
     static func show(vm: NotchViewModel) {
-        let organizer = MenuBarOrganizer.shared
         let menu = NSMenu()
         menu.autoenablesItems = false
-        menu.addItem(submenu("Show Tabs", items: NotchViewModel.Tab.offered.map { tab in
-            Item(tab.title, checked: vm.isEnabled(tab), enabled: !(vm.isEnabled(tab) && vm.enabledTabs.count == 1)) {
-                vm.setEnabled(tab, !vm.isEnabled(tab))
-            }
-        }))
+        addQuickItems(to: menu, vm: vm)
         menu.addItem(.separator())
-        addClaudeItems(to: menu, vm: vm)
-        menu.addItem(.separator())
-        addSystemItems(to: menu, vm: vm)
-        let tidy = Item("Tidy Menu Bar Icons", checked: organizer.isEnabled) {
-            organizer.setEnabled(!organizer.isEnabled)
-            if organizer.isEnabled {
-                vm.showToast("Icons left of the divider are hidden. Click the chevron to show them, ⌘-drag to rearrange.")
-            }
-        }
-        tidy.toolTip = "Hides menu bar icons you rarely use behind a chevron, so the ones you need fit beside the notch."
-        menu.addItem(tidy)
-        menu.addItem(.separator())
-        menu.addItem(Item("Lock Screen") { vm.close(); ScreenLock.lock() })
-        menu.addItem(Item("Quit NotchBar") { NSApp.terminate(nil) })
+        menu.addItem(Item("Beenden") { NSApp.terminate(nil) })
 
         vm.isMenuOpen = true
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
@@ -70,7 +52,7 @@ enum NotchMenu {
 
     private static func addSystemItems(to menu: NSMenu, vm: NotchViewModel) {
         let hud = vm.hudService
-        addTickerItems(to: menu, vm: vm)
+        addQuickItems(to: menu, vm: vm)
         let hotkeys = Item("Global Hotkeys", checked: vm.hotkeys.isEnabled) { vm.hotkeys.setEnabled(!vm.hotkeys.isEnabled) }
         hotkeys.toolTip = "⌃⌥N opens or closes the notch. ⌃⌥M mutes the system output. ⌃⌥S recalls the next saved scene."
         menu.addItem(hotkeys)
@@ -178,6 +160,13 @@ enum NotchMenu {
                 vm.showToast("Launch at Login needs the app in /Applications.")
             }
         })
+    }
+
+    private static func addQuickItems(to menu: NSMenu, vm: NotchViewModel) {
+        menu.addItem(Item("Einstellungen…") { vm.showSettings() })
+        menu.addItem(.separator())
+        menu.addItem(Item("Mixer on Hover", checked: vm.mixerOnHover) { vm.mixerOnHover.toggle() })
+        menu.addItem(Item("Keep Awake", checked: vm.awake.isOn) { vm.awake.toggle() })
     }
 
     private static func addTickerItems(to menu: NSMenu, vm: NotchViewModel) {

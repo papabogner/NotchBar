@@ -21,7 +21,10 @@ struct CollapsedNotch: View {
                     .frame(width: balanced ?? vm.leftWing)
                     .frame(maxWidth: vm.isHovering ? .infinity : nil, maxHeight: .infinity)
                     .contentShape(Rectangle())
-                    .onTapGesture { vm.open(timer.isActive ? .timer : .media) }
+                    .onTapGesture {
+                        if vm.ticker.shows, vm.ticker.current?.url != nil { vm.ticker.openCurrent() }
+                        else { vm.open(timer.isActive ? .timer : .media) }
+                    }
 
                 Color.black.opacity(0.001)
                     .frame(width: vm.geometry.notchWidth)
@@ -63,7 +66,8 @@ struct CollapsedNotch: View {
         } else if timer.isActive && vm.isEnabled(.timer) {
             TimerWing(timer: timer).transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if vm.ticker.shows, let line = vm.ticker.current {
-            Text(line).font(chrome.font(11, weight: .medium)).lineLimit(1)
+            Text(line.text).font(chrome.font(11, weight: line.breaking ? .semibold : .medium)).lineLimit(1)
+                .foregroundStyle(line.breaking ? chrome.accent : .white)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 6)
                 .transition(.opacity)

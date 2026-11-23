@@ -215,6 +215,8 @@ final class NotchController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
+    func showSettings() { SettingsWindow.show(vm: vm) }
+
     /// The panel stays out of the way until a text field is on screen.
     private func setTyping(_ on: Bool) {
         panel.allowsTyping = on
