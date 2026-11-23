@@ -21,11 +21,11 @@ struct HomePanel: View {
                 columns
             }
         }
-        .frame(height: 304, alignment: .top)
+        .frame(height: combinedHome ? 406 : 304, alignment: .top)
     }
 
-    /// Now playing and the mixer strips in one row, then the rest of Home underneath.
-    /// The notch stays the same height as the classic Home.
+    /// Now playing on the left, tall mixer pills on the right, then the rest of Home.
+    /// Taller than the classic Home so the faders are usable.
     private var combined: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
@@ -39,11 +39,11 @@ struct HomePanel: View {
                     if volumes.needsApplyHint {
                         Text("Drag a fader to apply.").font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.45))
                     }
-                    MixerStripRow(mixer: volumes, highlight: media.nowPlaying?.source.bundleID, compact: true)
-                        .frame(height: volumes.needsApplyHint ? 72 : 86)
+                    MixerStripRow(mixer: volumes, highlight: media.nowPlaying?.source.bundleID, compact: false)
+                        .frame(height: 196)
                 }
             }
-            .frame(height: 118, alignment: .top)
+            .frame(height: 220, alignment: .top)
             lowerColumns
         }
     }

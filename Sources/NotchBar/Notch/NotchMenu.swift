@@ -81,6 +81,10 @@ enum NotchMenu {
             }
             combined.toolTip = "Shows now playing and the volume strips together. Turn off to restore the old Home."
             menu.addItem(combined)
+            menu.addItem(Item("Open on Hover", checked: vm.openOnHover) { vm.openOnHover.toggle() })
+            let mixerHover = Item("Mixer on Hover", checked: vm.mixerOnHover) { vm.mixerOnHover.toggle() }
+            mixerHover.toolTip = "Hovering the notch opens the Mixer. Click still opens whatever you tapped."
+            menu.addItem(mixerHover)
         }
         let replace = Item(hud.waitingForAccess ? "Replace System HUD (waiting for Accessibility)" : "Replace System HUD",
                            checked: hud.replaceSystemHUD) {

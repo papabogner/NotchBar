@@ -70,6 +70,10 @@ final class NotchViewModel: ObservableObject {
     @Published private(set) var showsCamera = false
     /// Leaves the notch out of screenshots, screen recordings and screen sharing.
     @Published var hideFromScreenshots: Bool { didSet { UserDefaults.standard.set(hideFromScreenshots, forKey: "hideFromScreenshots") } }
+    /// Hovering the closed notch opens it after a short pause. Click still opens at once.
+    @Published var openOnHover: Bool { didSet { UserDefaults.standard.set(openOnHover, forKey: "openOnHover") } }
+    /// That hover-open shows the Mixer tab.
+    @Published var mixerOnHover: Bool { didSet { UserDefaults.standard.set(mixerOnHover, forKey: "mixerOnHover") } }
 
     let media: MediaController
     let usage: ClaudeUsageStore
@@ -99,6 +103,8 @@ final class NotchViewModel: ObservableObject {
         let mixer = volumes ?? AppVolumeMixer()
         self.volumes = mixer
         hideFromScreenshots = UserDefaults.standard.bool(forKey: "hideFromScreenshots")
+        openOnHover = UserDefaults.standard.object(forKey: "openOnHover") as? Bool ?? true
+        mixerOnHover = UserDefaults.standard.object(forKey: "mixerOnHover") as? Bool ?? true
         self.media = media
         self.usage = usage
         self.timer = timer
@@ -208,8 +214,9 @@ final class NotchViewModel: ObservableObject {
         let content: CGFloat
         switch tab {
         case _ where showsCamera: content = 262
-        case .home: content = 346
-        case .calendar, .activity, .mixer: content = 222
+        case .home: content = (isEnabled(.mixer) && volumes.combineOnHome) ? 448 : 346
+        case .calendar, .activity: content = 222
+        case .mixer: content = 300
         default: content = 150
         }
         // A toast gets its own strip below the content instead of covering it.

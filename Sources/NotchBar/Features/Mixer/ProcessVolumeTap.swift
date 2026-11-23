@@ -75,7 +75,7 @@ final class ProcessVolumeTap {
     /// Lock-free. Safe to call while the render callback is running.
     func setGain(_ gain: Float) {
         guard let context else { return }
-        let clamped = min(1, max(0, gain))
+        let clamped = min(1.5, max(0, gain))
         let new = Int32(bitPattern: clamped.bitPattern)
         let ptr = int32Field(context, targetOffset)
         while true {
@@ -192,7 +192,7 @@ final class ProcessVolumeTap {
         let tapOffset = totalInput > tapChannels ? totalInput - tapChannels : 0
 
         let context = UnsafeMutablePointer<TapContext>.allocate(capacity: 1)
-        let clamped = min(1, max(0, gain))
+        let clamped = min(1.5, max(0, gain))
         var rate = inputFormat.mSampleRate
         if !(rate > 0) { rate = 48_000 }
         var step = Float(1.0 / (rate * 0.010))
@@ -375,7 +375,10 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
                     _ = OSAtomicCompareAndSwap32Barrier(0, 1, int32Field(context, faultOffset))
                     return false
                 }
-                sample = read * gain
+                var shaped = read * gain
+                // Above 100% the extra gain is limited so peaks don't turn into hard crackle.
+                if gain > 1 { shaped = tanhf(shaped) }
+                sample = shaped
             } else {
                 sample = 0
             }

@@ -36,6 +36,8 @@ final class AppVolumeMixer: ObservableObject {
     @Published private(set) var statusMessage: String?
     /// Saved levels are showing, but this launch hasn't applied them yet.
     @Published private(set) var showSavedHint = false
+    /// Option-click solo: every other app is silenced until solo is cleared.
+    @Published private(set) var soloID: String?
 
     private let systemAudio: SystemAudio
     private let activity: AudioActivityMonitor
@@ -62,6 +64,13 @@ final class AppVolumeMixer: ObservableObject {
     private static let levelsKey = "appVolumeLevels"
     private static let explainedKey = "appVolumeExplained"
     private static let homeKey = "homeMixerCombined"
+    private static let scenesKey = "mixerScenes"
+
+    private struct SceneSnapshot: Codable {
+        var levels: [String: SavedLevel]
+        var masterLevel: Int
+        var masterMuted: Bool
+    }
 
     init(systemAudio: SystemAudio? = nil, activity: AudioActivityMonitor? = nil, preview: [AppVolumeRow]? = nil,
          previewMaster: MasterLevel? = nil) {
@@ -134,7 +143,7 @@ final class AppVolumeMixer: ObservableObject {
     func setLevel(_ bundleID: String, _ level: Int) {
         guard !isPreview else { return }
         guard #available(macOS 14.4, *) else { return }
-        let clamped = min(100, max(0, level))
+        let clamped = min(150, max(0, level))
         let muted = saved[bundleID]?.muted ?? false
         let unchanged = (saved[bundleID]?.level ?? 100) == clamped
         // After a relaunch the fader still shows the saved level, but nothing is tapped until
@@ -159,6 +168,57 @@ final class AppVolumeMixer: ObservableObject {
             return
         }
         store(bundleID, level: level, muted: nextMuted)
+    }
+
+    func toggleSolo(_ bundleID: String) {
+        guard !isPreview else { return }
+        guard #available(macOS 14.4, *) else { return }
+        if !explained {
+            needsExplanation = true
+            return
+        }
+        soloID = soloID == bundleID ? nil : bundleID
+        if soloID != nil { engaged = true }
+        updateHooks()
+        syncTaps()
+    }
+
+    func hasScene(_ name: String) -> Bool { loadScenes()[name] != nil }
+
+    private func loadScenes() -> [String: SceneSnapshot] {
+        guard let data = UserDefaults.standard.data(forKey: Self.scenesKey),
+              let decoded = try? JSONDecoder().decode([String: SceneSnapshot].self, from: data) else { return [:] }
+        return decoded
+    }
+
+    func saveScene(_ name: String) {
+        guard !isPreview else { return }
+        var all = loadScenes()
+        all[name] = SceneSnapshot(levels: saved, masterLevel: master.level, masterMuted: master.muted)
+        if let data = try? JSONEncoder().encode(all) {
+            UserDefaults.standard.set(data, forKey: Self.scenesKey)
+        }
+    }
+
+    func recallScene(_ name: String) {
+        guard !isPreview, let scene = loadScenes()[name] else { return }
+        guard #available(macOS 14.4, *) else { return }
+        let needsTap = scene.levels.contains { $0.value.muted || $0.value.level != 100 }
+        if needsTap && !explained {
+            needsExplanation = true
+            return
+        }
+        saved = scene.levels.filter { $0.value.level != 100 || $0.value.muted }
+        if needsTap { engaged = true }
+        persist()
+        let masterLevel = min(100, max(0, scene.masterLevel))
+        systemAudio.setVolume(Float(masterLevel) / 100)
+        if scene.masterMuted { systemAudio.setMuted(true) }
+        master.level = masterLevel
+        master.muted = scene.masterMuted
+        publishRows()
+        updateHooks()
+        syncTaps()
     }
 
     func acceptExplanation() {
@@ -204,7 +264,8 @@ final class AppVolumeMixer: ObservableObject {
 
     /// A tap is wanted only after the user has moved a slider this launch, and only off 100% or muted.
     private var needsActiveTaps: Bool {
-        engaged && saved.contains { $0.value.muted || $0.value.level != 100 }
+        if soloID != nil { return true }
+        return engaged && saved.contains { $0.value.muted || $0.value.level != 100 }
     }
 
     private func syncTaps() {
@@ -218,7 +279,7 @@ final class AppVolumeMixer: ObservableObject {
                 guard level?.muted == true || (level?.level ?? 100) != 100 else { continue }
                 mixerLog.info("processes \(group.app.name, privacy: .public) \(self.activity.mixerProcessDetail(group.processObjects), privacy: .public)")
             }
-            engine().sync(saved: saved, groups: groups, permissionDenied: permissionDenied)
+            engine().sync(saved: saved, groups: groups, permissionDenied: permissionDenied, solo: soloID)
         } else if #available(macOS 14.4, *) {
             (engineBox as? Engine)?.stopAll()
         }
@@ -367,11 +428,11 @@ final class AppVolumeMixer: ObservableObject {
             self.onProblem = onProblem
         }
 
-        func sync(saved: [String: SavedLevel], groups: [PlayingProcessGroup], permissionDenied: Bool) {
+        func sync(saved: [String: SavedLevel], groups: [PlayingProcessGroup], permissionDenied: Bool, solo: String?) {
             var playing: [String: PlayingProcessGroup] = [:]
             for group in groups { playing[group.app.bundleID] = group }
             for id in Array(taps.keys) {
-                let keep = playing[id].map { wantsTap(saved[id]) && !suppressed.contains(id) && taps[id]?.matches($0.processObjects) == true } ?? false
+                let keep = playing[id].map { wantsTap(id: id, level: saved[id], solo: solo) && !suppressed.contains(id) && taps[id]?.matches($0.processObjects) == true } ?? false
                 if !keep {
                     taps[id]?.stop()
                     taps.removeValue(forKey: id)
@@ -380,8 +441,8 @@ final class AppVolumeMixer: ObservableObject {
             guard !permissionDenied else { return }
             for group in groups {
                 let id = group.app.bundleID
-                guard wantsTap(saved[id]), !suppressed.contains(id) else { continue }
-                let gain = gainValue(saved[id])
+                guard wantsTap(id: id, level: saved[id], solo: solo), !suppressed.contains(id) else { continue }
+                let gain = gainValue(id: id, level: saved[id], solo: solo)
                 if let existing = taps[id], existing.matches(group.processObjects) {
                     if existing.hasFault {
                         fail(id, permission: false, detail: "The audio callback failed.")
@@ -414,14 +475,16 @@ final class AppVolumeMixer: ObservableObject {
         func clearSuppression() { suppressed.removeAll() }
         func unsuppress(_ id: String) { suppressed.remove(id) }
 
-        private func wantsTap(_ level: SavedLevel?) -> Bool {
+        private func wantsTap(id: String, level: SavedLevel?, solo: String?) -> Bool {
+            if let solo, solo != id { return true }
             guard let level else { return false }
             return level.muted || level.level != 100
         }
 
-        private func gainValue(_ level: SavedLevel?) -> Float {
+        private func gainValue(id: String, level: SavedLevel?, solo: String?) -> Float {
+            if let solo, solo != id { return 0 }
             guard let level, !level.muted else { return 0 }
-            return Float(level.level) / 100
+            return min(1.5, max(0, Float(level.level) / 100))
         }
 
         private func fail(_ id: String, permission: Bool, detail: String) {

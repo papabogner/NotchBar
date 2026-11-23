@@ -12,11 +12,15 @@ struct MixerPanel: View {
             } else if mixer.permissionDenied {
                 denied
             } else {
-                if mixer.rows.isEmpty {
-                    Text("No apps with audio").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
-                } else if mixer.showSavedHint || mixer.needsApplyHint {
-                    Text("Move a fader to apply saved levels.")
-                        .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
+                HStack {
+                    if mixer.rows.isEmpty {
+                        Text("No apps with audio").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                    } else if mixer.showSavedHint || mixer.needsApplyHint {
+                        Text("Drag a fader to apply. Option-click solos. Double-click is 100%.")
+                            .font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).lineLimit(2)
+                    }
+                    Spacer(minLength: 8)
+                    sceneMenu
                 }
                 MixerStripRow(mixer: mixer, highlight: highlight, compact: false)
             }
@@ -26,7 +30,7 @@ struct MixerPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .frame(height: 184, alignment: .top)
+        .frame(height: 250, alignment: .top)
     }
 
     private var explanation: some View {
@@ -61,6 +65,25 @@ struct MixerPanel: View {
                 .background(Capsule().fill(.white))
         }
         .buttonStyle(PressableStyle(scale: 0.95))
+    }
+
+    private var sceneMenu: some View {
+        Menu {
+            sceneItems("Focus")
+            sceneItems("Call")
+        } label: {
+            Text("Scenes").font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 10).frame(height: 22)
+                .background(Capsule().fill(.white.opacity(0.1)))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    @ViewBuilder private func sceneItems(_ name: String) -> some View {
+        Button("Save \(name)") { mixer.saveScene(name) }
+        Button("Recall \(name)") { mixer.recallScene(name) }
+            .disabled(!mixer.hasScene(name))
     }
 
     private func quietButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -98,43 +121,26 @@ private struct MasterStrip: View {
     var compact: Bool
 
     var body: some View {
-        VStack(spacing: compact ? 3 : 5) {
-            Image(systemName: mixer.master.muted ? "speaker.slash.fill" : "speaker.wave.3.fill")
-                .font(.system(size: compact ? 12 : 16, weight: .semibold))
-                .frame(width: compact ? 16 : 26, height: compact ? 16 : 26)
-            Text(mixer.master.name)
-                .font(.system(size: compact ? 9 : 10.5, weight: .semibold))
-                .lineLimit(1)
-                .frame(width: compact ? 52 : 72)
-            VolumeFader(level: mixer.master.muted ? 0 : mixer.master.level, enabled: !mixer.master.muted) {
+        VStack(spacing: 4) {
+            PillFader(level: mixer.master.level, maxLevel: 100, muted: mixer.master.muted, width: compact ? 48 : 56) {
                 mixer.setMasterLevel($0)
-            }
-            .frame(maxHeight: compact ? 36 : .infinity)
-            .accessibilityLabel("System volume")
-            Text(mixer.master.muted ? "Off" : "\(mixer.master.level)")
-                .font(.system(size: compact ? 9 : 11, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.7))
-            muteButton(muted: mixer.master.muted, help: mixer.master.muted ? "Unmute system" : "Mute system") {
+            } onMute: {
                 mixer.toggleMasterMute()
+            } onReset: {
+                mixer.setMasterLevel(100)
+            } icon: {
+                Image(systemName: mixer.master.muted ? "speaker.slash.fill" : "speaker.wave.3.fill")
+                    .font(.system(size: compact ? 14 : 18, weight: .semibold))
             }
+            Text(mixer.master.name)
+                .font(.system(size: 10, weight: .semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(width: compact ? 56 : 68, height: 26, alignment: .top)
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 2)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.08)))
-        .frame(width: compact ? 58 : 80)
-    }
-
-    private func muteButton(muted: Bool, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.system(size: compact ? 9 : 11, weight: .semibold))
-                .foregroundStyle(muted ? Color.black : .white.opacity(0.85))
-                .frame(width: compact ? 20 : 26, height: compact ? 20 : 26)
-                .background(Circle().fill(muted ? .white : .white.opacity(0.1)))
-                .contentShape(Circle())
-        }
-        .buttonStyle(PressableStyle())
-        .help(help)
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(0.08)))
+        .help("System volume. Double-click for 100%.")
     }
 }
 
@@ -144,39 +150,34 @@ private struct ChannelStrip: View {
     @ObservedObject var mixer: AppVolumeMixer
     var compact: Bool
     var highlighted: Bool
+    @State private var shimmer = false
+
+    private var silenced: Bool { row.muted || (mixer.soloID != nil && mixer.soloID != row.id) }
 
     var body: some View {
-        VStack(spacing: compact ? 3 : 5) {
-            icon
-            Text(row.name)
-                .font(.system(size: compact ? 9 : 10.5, weight: highlighted ? .semibold : .medium))
-                .lineLimit(1)
-                .frame(width: compact ? 48 : 64)
-            VolumeFader(level: row.muted ? 0 : row.level, enabled: !row.muted) { mixer.setLevel(row.id, $0) }
-                .frame(maxHeight: compact ? 36 : .infinity)
-                .accessibilityLabel("\(row.name) volume")
-            Text(row.muted ? "Off" : "\(row.level)")
-                .font(.system(size: compact ? 9 : 11, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.7))
-            Button { mixer.toggleMute(row.id) } label: {
-                Image(systemName: row.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                    .font(.system(size: compact ? 9 : 11, weight: .semibold))
-                    .foregroundStyle(row.muted ? Color.black : .white.opacity(0.85))
-                    .frame(width: compact ? 20 : 26, height: compact ? 20 : 26)
-                    .background(Circle().fill(row.muted ? .white : .white.opacity(0.1)))
-                    .contentShape(Circle())
+        VStack(spacing: 4) {
+            PillFader(level: silenced ? 0 : row.level, maxLevel: 150, muted: silenced, width: compact ? 48 : 56) {
+                mixer.setLevel(row.id, $0)
+            } onMute: {
+                mixer.toggleMute(row.id)
+            } onReset: {
+                mixer.setLevel(row.id, 100)
+            } onSolo: {
+                mixer.toggleSolo(row.id)
+            } icon: {
+                icon
             }
-            .buttonStyle(PressableStyle())
-            .help(row.muted ? "Unmute \(row.name)" : "Mute \(row.name)")
+            Text(mixer.soloID == row.id ? "Solo" : row.name)
+                .font(.system(size: 10, weight: highlighted || mixer.soloID == row.id ? .semibold : .medium))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(width: compact ? 56 : 68, height: 26, alignment: .top)
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 2)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(highlighted ? .white.opacity(0.08) : .clear))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(.white.opacity(highlighted ? 0.4 : 0), lineWidth: 1))
-        .opacity(row.playing ? 1 : 0.42)
-        .frame(width: compact ? 52 : 72)
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .stroke(.white.opacity(highlighted ? 0.55 : 0), lineWidth: 1.5))
+        .opacity(row.playing ? 1 : 0.45)
+        .help("\(row.name). Double-click for 100%. Option-click to solo.")
     }
 
     @ViewBuilder private var icon: some View {
@@ -188,40 +189,109 @@ private struct ChannelStrip: View {
                 Image(systemName: "app.fill").font(.system(size: compact ? 11 : 14)).frame(width: side, height: side)
             }
             if row.playing {
-                Circle().fill(Color.green).frame(width: 6, height: 6).offset(x: 2, y: -2)
+                Circle().fill(Color.green).frame(width: 7, height: 7)
+                    .opacity(shimmer ? 1 : 0.4)
+                    .offset(x: 3, y: -3)
+                    .onAppear { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { shimmer = true } }
             }
         }
     }
 }
 
-/// Capsule fader. The top of the track is 100%.
-private struct VolumeFader: View {
+/// A tall rounded pill. Drag moves from where you grabbed, scroll changes a step,
+/// double-click returns to 100%, and the icon mutes.
+private struct PillFader<Icon: View>: View {
     var level: Int
-    var enabled: Bool
+    var maxLevel: Int
+    var muted: Bool
+    var width: CGFloat
     var onChange: (Int) -> Void
+    var onMute: () -> Void
+    var onReset: () -> Void
+    var onSolo: (() -> Void)? = nil
+    @ViewBuilder var icon: Icon
     @State private var dragging = false
+    @State private var origin: Int?
 
     var body: some View {
         GeometryReader { g in
-            let fraction = CGFloat(level) / 100
+            let fraction = CGFloat(min(maxLevel, max(0, level))) / CGFloat(max(maxLevel, 1))
+            let fill = muted ? 0 : g.size.height * fraction
             ZStack(alignment: .bottom) {
-                Capsule().fill(.white.opacity(0.16))
-                Capsule().fill(.white.opacity(enabled ? 1 : 0.45))
-                    .frame(height: level <= 0 ? 0 : max(dragging ? 8 : 6, g.size.height * fraction))
+                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(0.14))
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.white.opacity(muted ? 0.28 : 0.92))
+                    .frame(height: max(0, fill))
+                VStack(spacing: 0) {
+                    Text(muted ? "Off" : "\(level)")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(muted || fraction < 0.72 ? .white : .black)
+                        .padding(.top, 8)
+                    Spacer(minLength: 0)
+                    Button(action: onMute) {
+                        icon.foregroundStyle(muted || fraction < 0.22 ? .white.opacity(0.9) : .black.opacity(0.85))
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.9))
+                    .padding(.bottom, 8)
+                }
             }
-            .frame(width: dragging ? 8 : 6)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                guard enabled, g.size.height > 0 else { return }
-                dragging = true
-                let fromTop = min(1, max(0, value.location.y / g.size.height))
-                onChange(Int(((1 - fromTop) * 100).rounded()))
-            }.onEnded { _ in dragging = false })
+            .frame(width: width, height: g.size.height)
+            .frame(maxWidth: .infinity)
+            .scaleEffect(dragging ? 1.04 : 1)
+            .animation(.spring(response: 0.28, dampingFraction: 0.72), value: dragging)
+            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: level)
+            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: muted)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .gesture(DragGesture(minimumDistance: 4).onChanged { value in
+                if origin == nil {
+                    origin = level
+                    dragging = true
+                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                }
+                let travel = max(g.size.height, 1)
+                let delta = Int((-value.translation.height / travel * CGFloat(maxLevel)).rounded())
+                onChange(min(maxLevel, max(0, (origin ?? level) + delta)))
+            }.onEnded { _ in
+                origin = nil
+                dragging = false
+            })
+            .onTapGesture(count: 2) { onReset() }
+            .simultaneousGesture(TapGesture().modifiers(.option).onEnded { onSolo?() })
+            .background(ScrollWheelCatcher { delta in
+                let step = max(1, Int((abs(delta) / 12).rounded()))
+                let next = level + (delta > 0 ? step : -step)
+                onChange(min(maxLevel, max(0, next)))
+            })
+            .accessibilityLabel("Volume")
         }
         .frame(maxHeight: .infinity)
-        .opacity(enabled ? 1 : 0.55)
-        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: level)
+        .frame(width: width + 8)
+    }
+}
+
+/// Trackpad and mouse-wheel changes, delivered on the main thread by AppKit.
+private struct ScrollWheelCatcher: NSViewRepresentable {
+    var onScroll: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> WheelView {
+        let view = WheelView()
+        view.onScroll = onScroll
+        return view
+    }
+
+    func updateNSView(_ view: WheelView, context: Context) {
+        view.onScroll = onScroll
+    }
+
+    final class WheelView: NSView {
+        var onScroll: ((CGFloat) -> Void)?
+        override func scrollWheel(with event: NSEvent) {
+            let delta = event.scrollingDeltaY
+            guard delta != 0 else { return }
+            onScroll?(delta)
+        }
     }
 }
 
