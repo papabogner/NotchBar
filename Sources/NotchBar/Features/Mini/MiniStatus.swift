@@ -1,18 +1,21 @@
 import Combine
 import Foundation
 
+/// The SSH result. A top-level type so a background task can return it.
+struct MiniReport: Sendable, Equatable {
+    var online = false
+    var load = ""
+    var disk = ""
+    var uptime = ""
+    var memory = ""
+    var top = ""
+    static let offline = MiniReport()
+}
+
 /// Status of another Mac, read over SSH. Off until the menu turns it on.
 @MainActor
 final class MiniStatus: ObservableObject {
-    struct Report: Sendable, Equatable {
-        var online = false
-        var load = ""
-        var disk = ""
-        var uptime = ""
-        var memory = ""
-        var top = ""
-        static let offline = Report()
-    }
+    typealias Report = MiniReport
 
     @Published private(set) var isEnabled = false
     @Published var host: String
