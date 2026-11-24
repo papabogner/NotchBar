@@ -45,7 +45,7 @@ private struct SettingsRoot: View {
 
     var body: some View {
         NavigationSplitView {
-            List(Pane.allCases, selection: $section) { item in
+            List(panes, selection: $section) { item in
                 Text(item.title).tag(item)
             }
             .listStyle(.sidebar)
@@ -57,6 +57,15 @@ private struct SettingsRoot: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(minWidth: 760, minHeight: 500)
+    }
+
+    /// Ticker and integrations stay out of the sidebar until their switch is on.
+    private var panes: [Pane] {
+        var items: [Pane] = [.general, .audio, .look]
+        if vm.ticker.isEnabled { items.append(.ticker) }
+        if vm.spotify.isEnabled || vm.mini.isEnabled || vm.portfolio.isEnabled { items.append(.integrations) }
+        items.append(contentsOf: [.shortcuts, .about])
+        return items
     }
 
     @ViewBuilder private var pane: some View {
@@ -85,6 +94,19 @@ private struct SettingsRoot: View {
                 Toggle("Kopfhörer", isOn: Binding(get: { vm.hudService.showDevices }, set: { vm.hudService.showDevices = $0 }))
                 Toggle("Diktat", isOn: Binding(get: { vm.dictation.isEnabled }, set: { vm.dictation.isEnabled = $0 }))
                 Toggle("System-HUD ersetzen", isOn: Binding(get: { vm.hudService.replaceSystemHUD }, set: { vm.hudService.setReplaceSystemHUD($0) }))
+            }
+            Section("Extras (Leistung)") {
+                Text("Aus, bis du sie einschaltest. Dateien, Feeds und Abfragen starten erst dann.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Claude-Nutzung", isOn: Binding(get: { vm.usage.isMonitoring }, set: { on in
+                    vm.usage.setMonitoring(on)
+                    if !on, vm.tab == .claude { vm.tab = vm.preferredTab }
+                }))
+                Toggle("Agentenstatus", isOn: $vm.agentsExtra)
+                Toggle("Ticker", isOn: Binding(get: { vm.ticker.isEnabled }, set: { vm.ticker.isEnabled = $0 }))
+                Toggle("Mac mini", isOn: Binding(get: { vm.mini.isEnabled }, set: { vm.mini.setEnabled($0) }))
+                Toggle("Portfolio", isOn: Binding(get: { vm.portfolio.isEnabled }, set: { vm.portfolio.setEnabled($0) }))
+                Toggle("Spotify Connect", isOn: Binding(get: { vm.spotify.isEnabled }, set: { vm.spotify.setEnabled($0) }))
             }
             Section("Menüleiste") {
                 Toggle("Seltene Symbole einklappen", isOn: Binding(get: { MenuBarOrganizer.shared.isEnabled }, set: { MenuBarOrganizer.shared.setEnabled($0) }))

@@ -18,6 +18,8 @@ final class ClaudeUsageStore: ObservableObject {
     private var pendingCalibration: UsageCalibration?
     private var pendingMatchDone: ((Bool) -> Void)?
     private var isStarted = false
+    /// Off until Einstellungen → Extras. The transcript scan reads a very large folder.
+    @Published private(set) var isMonitoring = false
     private var needsFullScan = false
     private var expiryTimer: Timer?
     @Published private(set) var activity: ClaudeActivity = .idle
@@ -62,7 +64,26 @@ final class ClaudeUsageStore: ObservableObject {
         isConnected = limits != nil
     }
 
+    func setMonitoring(_ on: Bool) {
+        isMonitoring = on
+        UserDefaults.standard.set(on, forKey: "claudeUsageEnabled")
+        if on {
+            if !isStarted { start() }
+        } else {
+            stop()
+        }
+    }
+
+    func stop() {
+        watcher = nil
+        if isStarted { periodicRescan.stop() }
+        expiryTimer?.invalidate()
+        expiryTimer = nil
+        isStarted = false
+    }
+
     func start() {
+        isMonitoring = true
         ClaudeCodeIntegration.upgradeScriptsIfInstalled()
         try? FileManager.default.createDirectory(at: ClaudeCodeIntegration.folder, withIntermediateDirectories: true)
         reloadIntegration()

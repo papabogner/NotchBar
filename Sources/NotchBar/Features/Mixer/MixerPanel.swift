@@ -14,16 +14,24 @@ struct MixerPanel: View {
                 denied
             } else {
                 HStack {
-                    if mixer.rows.isEmpty {
-                        Text("No apps with audio").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
-                    } else if mixer.showSavedHint || mixer.needsApplyHint {
-                        Text("Drag a fader to apply. Option-click solos. Double-click is 100%.")
-                            .font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).lineLimit(2)
-                    }
+                    Text("Mixer")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.92))
                     Spacer(minLength: 8)
                     sceneMenu
                 }
-                MixerStripRow(mixer: mixer, highlight: highlight, compact: false, spotify: spotify)
+                if mixer.rows.isEmpty {
+                    Text("Keine Apps mit Audio")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.5))
+                } else if visibleStrips.isEmpty {
+                    Text("Gerade spielt nichts. Stumme Apps einblenden, um sie trotzdem zu sehen.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                MixerStripRow(mixer: mixer, highlight: highlight, compact: false, spotify: spotify, rows: visibleStrips)
+                CrossfaderBar(mixer: mixer)
             }
             if let status = mixer.statusMessage {
                 Text(status).font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
@@ -31,7 +39,11 @@ struct MixerPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .frame(height: 250, alignment: .top)
+        .frame(height: 330, alignment: .top)
+    }
+
+    private var visibleStrips: [AppVolumeRow] {
+        mixer.showSilentApps ? mixer.rows : mixer.rows.filter(\.playing)
     }
 
     private var explanation: some View {
@@ -103,17 +115,89 @@ struct MixerStripRow: View {
     var highlight: String?
     var compact: Bool
     var spotify: SpotifyConnect? = nil
+    /// The strips to draw. Home passes its own short list; the mixer tab passes the visible rows.
+    var rows: [AppVolumeRow]? = nil
+
+    private var strips: [AppVolumeRow] {
+        if let rows { return rows }
+        return mixer.showSilentApps ? mixer.rows : mixer.rows.filter(\.playing)
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: compact ? 8 : 10) {
+            HStack(alignment: .top, spacing: compact ? 8 : 12) {
                 MasterStrip(mixer: mixer, compact: compact)
                 Rectangle().fill(.white.opacity(0.14)).frame(width: 1).padding(.vertical, 6)
-                ForEach(mixer.rows) { row in
+                ForEach(strips) { row in
                     ChannelStrip(row: row, mixer: mixer, compact: compact, highlighted: row.id == highlight, spotify: spotify)
                 }
             }
+            .padding(.vertical, 2)
         }
+        .frame(height: compact ? 168 : 188)
+    }
+}
+
+/// Horizontal blend between two apps. Equal-power, on top of each app's own fader.
+private struct CrossfaderBar: View {
+    @ObservedObject var mixer: AppVolumeMixer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                slotMenu(isA: true)
+                Spacer(minLength: 4)
+                Text("Crossfader")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+                Spacer(minLength: 4)
+                slotMenu(isA: false)
+            }
+            GeometryReader { g in
+                let travel = max(g.size.width - 22, 1)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.1))
+                    Capsule()
+                        .fill(LinearGradient(colors: [.white.opacity(0.28), .white.opacity(0.08)], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: 22 + travel * mixer.crossfade)
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 18, height: 18)
+                        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                        .offset(x: travel * mixer.crossfade + 2)
+                }
+                .contentShape(Capsule())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    mixer.setCrossfade(Double(min(1, max(0, (value.location.x - 11) / travel))))
+                })
+            }
+            .frame(height: 22)
+            Toggle("Stumme Apps zeigen", isOn: Binding(get: { mixer.showSilentApps }, set: { mixer.setShowSilent($0) }))
+                .font(.system(size: 11, weight: .medium))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
+    }
+
+    private func slotMenu(isA: Bool) -> some View {
+        let current = isA ? mixer.crossA : mixer.crossB
+        let name = mixer.rows.first { $0.id == current }?.name ?? (isA ? "A" : "B")
+        return Menu {
+            ForEach(mixer.rows) { row in
+                Button(row.name) {
+                    if isA { mixer.setCrossA(row.id) } else { mixer.setCrossB(row.id) }
+                }
+            }
+        } label: {
+            Text(name)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: isA ? .leading : .trailing)
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: 120)
     }
 }
 
@@ -176,10 +260,18 @@ struct ChannelStrip: View {
     @State private var shimmer = false
 
     private var silenced: Bool { row.muted || (mixer.soloID != nil && mixer.soloID != row.id) }
+    @Environment(\.notchChrome) private var chrome
+    private var column: CGFloat {
+        switch chrome.faderStyle {
+        case .line: return compact ? 40 : 44
+        case .pill: return 52
+        case .tall: return 56
+        }
+    }
 
     var body: some View {
         VStack(spacing: 4) {
-            PillFader(level: silenced ? 0 : row.level, maxLevel: 150, muted: silenced, width: compact ? 48 : 56) {
+            PillFader(level: silenced ? 0 : row.level, maxLevel: 150, muted: silenced, width: column) {
                 mixer.setLevel(row.id, $0)
             } onMute: {
                 mixer.toggleMute(row.id)
@@ -194,9 +286,9 @@ struct ChannelStrip: View {
                 .font(.system(size: 10, weight: highlighted || mixer.soloID == row.id ? .semibold : .medium))
                 .multilineTextAlignment(.center)
                 .lineLimit(1)
-                .frame(width: compact ? 56 : 68)
+                .frame(width: column)
             if detailed {
-                outputMenu.frame(width: compact ? 56 : 68, height: 14)
+                outputMenu.frame(width: column, height: 14)
             }
             if row.id == SpotifyConnect.spotifyBundle, let spotify, spotify.isEnabled {
                 SpotifyDeviceMenu(spotify: spotify)
@@ -259,22 +351,25 @@ private struct PillFader<Icon: View>: View {
     @State private var origin: Int?
 
     var body: some View {
-        GeometryReader { g in
+        let wide = chrome.faderStyle != .line
+        let track: CGFloat = chrome.faderStyle == .line ? 4 : (chrome.faderStyle == .tall ? 36 : 32)
+        let corner = track / 2
+        return GeometryReader { g in
             let fraction = CGFloat(min(maxLevel, max(0, level))) / CGFloat(max(maxLevel, 1))
             let fill = muted ? 0 : g.size.height * fraction
-            let track: CGFloat = chrome.faderStyle == .line ? 4 : (chrome.faderStyle == .pill ? 6 : 8)
             ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: track / 2, style: .continuous)
-                    .fill(.white.opacity(0.16))
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(.white.opacity(wide ? 0.12 : 0.16))
                     .frame(width: track, height: g.size.height)
-                RoundedRectangle(cornerRadius: track / 2, style: .continuous)
-                    .fill(chrome.accent.opacity(muted ? 0.35 : 0.95))
-                    .frame(width: track, height: max(track, fill))
-                if chrome.faderStyle != .line {
-                    Circle().fill(.white)
-                        .frame(width: 7, height: 7)
-                        .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
-                        .offset(y: -max(0, fill - 4))
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(chrome.accent.opacity(muted ? 0.28 : 0.92))
+                    .frame(width: track, height: max(wide ? 10 : track, fill))
+                    .shadow(color: chrome.accent.opacity(muted || !wide ? 0 : 0.38), radius: wide ? 8 : 0)
+                if wide {
+                    Circle().fill(.white.opacity(0.95))
+                        .frame(width: 8, height: 8)
+                        .shadow(color: .black.opacity(0.28), radius: 1, y: 1)
+                        .offset(y: -max(2, fill - 6))
                 }
                 VStack(spacing: 0) {
                     Text(muted ? "Off" : "\(level)")
@@ -289,7 +384,7 @@ private struct PillFader<Icon: View>: View {
                     .buttonStyle(PressableStyle(scale: 0.9))
                 }
             }
-            .frame(width: max(width * 0.55, 28), height: g.size.height)
+            .frame(width: wide ? track : max(width * 0.55, 28), height: g.size.height)
             .frame(maxWidth: .infinity)
             .scaleEffect(dragging ? 1.04 : 1)
             .animation(.spring(response: 0.28, dampingFraction: 0.72), value: dragging)
@@ -319,7 +414,7 @@ private struct PillFader<Icon: View>: View {
             .accessibilityLabel("Volume")
         }
         .frame(maxHeight: .infinity)
-        .frame(width: (width + 8) * chrome.faderWidthScale)
+        .frame(width: wide ? max(width, track + 8) : (width + 8) * chrome.faderWidthScale)
     }
 }
 

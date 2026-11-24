@@ -98,7 +98,7 @@ final class NotchAppearance: ObservableObject {
         var cornerRadius = 30.0
         var density: Density = .comfortable
         var glassIntensity = 0.8
-        var faderStyle: FaderStyle = .line
+        var faderStyle: FaderStyle = .pill
         var glow = false
 
         static let classic = Theme()

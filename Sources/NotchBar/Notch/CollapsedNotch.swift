@@ -38,7 +38,7 @@ struct CollapsedNotch: View {
                                 .foregroundStyle(.white.opacity(0.9))
                                 .help("Keeping this Mac awake")
                         }
-                        if vm.isEnabled(.claude) { LiveClaudeLogo(usage: usage, size: 13) }
+                        if vm.usage.isMonitoring && vm.isEnabled(.claude) { LiveClaudeLogo(usage: usage, size: 13) }
                     }
                 }
                 .frame(width: balanced ?? vm.rightWing)

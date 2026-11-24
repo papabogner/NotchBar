@@ -95,7 +95,7 @@ struct ExpandedNotch: View {
     /// usually doesn't, and the highlighted icon and its tooltip have to do.
     private var showsTabLabel: Bool {
         let label = (vm.tab.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold)]).width
-        let others = CGFloat(vm.enabledTabs.count - 1)
+        let others = CGFloat(vm.visibleTabs.count - 1)
         let estimate = others * 25 + others * 2 + 4 + (20 + 13 + 5 + label) + 6
         return estimate <= sideWidth
     }
@@ -104,7 +104,7 @@ struct ExpandedNotch: View {
         let showsLabel = showsTabLabel
         return HStack(spacing: 0) {
             HStack(spacing: 2) {
-                ForEach(vm.enabledTabs) { tabButton($0, showsLabel: showsLabel) }
+                ForEach(vm.visibleTabs) { tabButton($0, showsLabel: showsLabel) }
             }
             .padding(2)
             .background(Capsule().fill(.white.opacity(0.06)))

@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clipboardShortcut: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        PerformanceMigration.applyOnce()
         let volumes = AppVolumeMixer(systemAudio: hud.audio)
         let vm = NotchViewModel(media: media, usage: usage, timer: timer, hudService: hud, clipboard: clipboard, calendar: calendar,
                                 weather: weather, dictation: dictation, activity: activity, volumes: volumes)
@@ -51,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DebugCommands.install(vm: vm, panel: controller.panel, controller: controller)
 
         media.start()
-        usage.start()
+        if UserDefaults.standard.bool(forKey: "claudeUsageEnabled") { usage.start() }
         hud.start()
         clipboard.start()
         calendar.start()
@@ -70,6 +71,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showSettings(_ sender: Any?) {
         controller?.showSettings()
+    }
+}
+
+/// One-time: heavy features stay off until they are switched on again.
+enum PerformanceMigration {
+    static func applyOnce() {
+        let key = "didSlimToMixer"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(false, forKey: "claudeUsageEnabled")
+        defaults.set(false, forKey: "agentsExtraEnabled")
+        defaults.set(false, forKey: "spotifyConnectEnabled")
+        defaults.set(false, forKey: "miniStatusEnabled")
+        defaults.set(false, forKey: "portfolioEnabled")
+        defaults.set(true, forKey: "mixerOnHover")
+        if let data = defaults.data(forKey: "tickerSettings"),
+           var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            object["enabled"] = false
+            if let encoded = try? JSONSerialization.data(withJSONObject: object) {
+                defaults.set(encoded, forKey: "tickerSettings")
+            }
+        }
+        if let data = defaults.data(forKey: "notchTheme"),
+           var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            object["faderStyle"] = "pill"
+            if let encoded = try? JSONSerialization.data(withJSONObject: object) {
+                defaults.set(encoded, forKey: "notchTheme")
+            }
+        }
+        defaults.set(true, forKey: key)
     }
 }
 

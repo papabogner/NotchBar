@@ -171,7 +171,7 @@ struct HomePanel: View {
         if layout.isEnabled(.agents), let session = vm.agents.sessions.first {
             parts.append("\(session.tool) \(session.state.label)")
         }
-        if layout.isEnabled(.claude), usage.sessionFraction > 0.005 {
+        if layout.isEnabled(.claude), usage.isMonitoring, usage.sessionFraction > 0.005 {
             parts.append("Claude \(Int((usage.sessionFraction * 100).rounded()))%")
         }
         if layout.isEnabled(.timer), timer.isActive {

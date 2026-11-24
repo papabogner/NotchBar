@@ -41,7 +41,13 @@ final class TickerStore: ObservableObject {
         }
     }
 
-    @Published var isEnabled: Bool { didSet { persist(); reschedule() } }
+    @Published var isEnabled: Bool {
+        didSet {
+            persist()
+            if isEnabled { spaceObserver.start() }
+            reschedule()
+        }
+    }
     @Published var sources: Set<Source> { didSet { persist(); reschedule() } }
     @Published var width: Double { didSet { persist() } }
     @Published var interval: Double {
@@ -100,8 +106,10 @@ final class TickerStore: ObservableObject {
         spaceObserver.onChange = { [weak self] in
             MainActor.assumeIsolated { self?.refreshMenuBar() }
         }
-        spaceObserver.start()
-        refreshMenuBar()
+        if isEnabled {
+            spaceObserver.start()
+            refreshMenuBar()
+        }
         reschedule()
     }
 
@@ -261,7 +269,11 @@ final class TickerStore: ObservableObject {
 private final class SpaceChangeObserver: NSObject {
     var onChange: (() -> Void)?
 
+    private var started = false
+
     func start() {
+        guard !started else { return }
+        started = true
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(changed),
             name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)

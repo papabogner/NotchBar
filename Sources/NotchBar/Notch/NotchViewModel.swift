@@ -59,7 +59,7 @@ final class NotchViewModel: ObservableObject {
 
     @Published var isExpanded = false
     @Published var isHovering = false
-    @Published var tab: Tab = .home
+    @Published var tab: Tab = .mixer
     @Published var geometry = NotchGeometry.fallback
     @Published var isMenuOpen = false
     @Published private(set) var banner: Banner?
@@ -109,6 +109,13 @@ final class NotchViewModel: ObservableObject {
 
     /// A settings sheet with a text field is open, so the notch must keep the keyboard.
     var acceptsText: Bool { showsSpotify || showsMini || showsTickerSettings || showsAppearance }
+    /// Agent files and process checks. Off until Extras is switched on.
+    @Published var agentsExtra: Bool {
+        didSet {
+            UserDefaults.standard.set(agentsExtra, forKey: "agentsExtraEnabled")
+            updateAgentWatch()
+        }
+    }
     let camera = CameraGlance()
 
     static let openSpring = Animation.spring(response: 0.5, dampingFraction: 0.86)
@@ -121,6 +128,7 @@ final class NotchViewModel: ObservableObject {
     init(media: MediaController, usage: ClaudeUsageStore, timer: TimerModel, hudService: HUDService,
          clipboard: ClipboardStore, calendar: CalendarStore, weather: WeatherStore, dictation: DictationMonitor,
          activity: ActivityMonitor, volumes: AppVolumeMixer? = nil) {
+        agentsExtra = UserDefaults.standard.bool(forKey: "agentsExtraEnabled")
         self.weather = weather
         self.dictation = dictation
         self.activity = activity
@@ -128,7 +136,7 @@ final class NotchViewModel: ObservableObject {
         self.volumes = mixer
         hideFromScreenshots = UserDefaults.standard.bool(forKey: "hideFromScreenshots")
         openOnHover = UserDefaults.standard.object(forKey: "openOnHover") as? Bool ?? true
-        mixerOnHover = UserDefaults.standard.object(forKey: "mixerOnHover") as? Bool ?? false
+        mixerOnHover = UserDefaults.standard.object(forKey: "mixerOnHover") as? Bool ?? true
         expandOnNewAudio = UserDefaults.standard.bool(forKey: "expandOnNewAudio")
         self.media = media
         self.usage = usage
@@ -142,6 +150,7 @@ final class NotchViewModel: ObservableObject {
         // Every stored property is set. Closures below may capture self.
         clipboard.isEnabled = isEnabled(.clipboard)
         if !enabledTabs.contains(tab) { tab = enabledTabs[0] }
+        if isEnabled(.mixer) { tab = .mixer }
         mixer.applySavedRoutesIfNeeded()
         mixer.additionalCallBundles = { [weak self] in
             guard let self, self.volumes.duckBrowserMeet else { return [] }
@@ -228,6 +237,7 @@ final class NotchViewModel: ObservableObject {
             self?.updateAgentWatch()
         }.store(in: &bag)
         agents.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        usage.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         updateAgentWatch()
         Publishers.CombineLatest3($isExpanded, $tab, $showsCamera)
             .sink { [weak self] _, _, _ in
@@ -277,7 +287,7 @@ final class NotchViewModel: ObservableObject {
         guard expandOnNewAudio, media.nowPlaying?.isPlaying == true, isEnabled(.media) else { return 0 }
         return 38
     }
-    var rightWing: CGFloat { (isEnabled(.claude) ? 30 : 0) + (awake.isOn ? 16 : 0) }
+    var rightWing: CGFloat { (usage.isMonitoring && isEnabled(.claude) ? 30 : 0) + (awake.isOn ? 16 : 0) }
 
     /// Moves a lopsided closed notch so it stays anchored to the camera housing.
     var shapeOffset: CGFloat {
@@ -305,7 +315,7 @@ final class NotchViewModel: ObservableObject {
         case _ where showsCamera: content = 262
         case .home: content = 252
         case .calendar, .activity: content = 222
-        case .mixer: content = 300
+        case .mixer: content = 420
         default: content = 150
         }
         // A toast gets its own strip below the content instead of covering it.
@@ -323,6 +333,11 @@ final class NotchViewModel: ObservableObject {
     // MARK: Tabs
 
     func isEnabled(_ tab: Tab) -> Bool { enabledTabs.contains(tab) }
+
+    /// Claude's usage tab stays out of the bar until Extras turns the scanner on.
+    var visibleTabs: [Tab] {
+        enabledTabs.filter { $0 != .claude || usage.isMonitoring }
+    }
 
     /// Shows or hides a tab. At least one stays visible.
     func setEnabled(_ tab: Tab, _ enabled: Bool) {
@@ -348,8 +363,8 @@ final class NotchViewModel: ObservableObject {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.watchUpdatePending = false
-                let wants = (self.isExpanded && self.tab == .home)
-                    || (self.ticker.isEnabled && self.ticker.sources.contains(.agents))
+                let wants = self.agentsExtra && ((self.isExpanded && (self.tab == .home || self.tab == .mixer))
+                    || (self.ticker.isEnabled && self.ticker.sources.contains(.agents)))
                 let miniHome = self.isExpanded && self.tab == .home && self.mini.isEnabled
                 let miniTicker = self.ticker.isEnabled && self.ticker.sources.contains(.mini) && self.mini.isEnabled
                 let bookHome = self.isExpanded && self.tab == .home && self.portfolio.isEnabled
@@ -378,7 +393,11 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// The tab to open from the middle of the notch: Home, or the first visible tab.
-    var preferredTab: Tab { isEnabled(.home) ? .home : enabledTabs[0] }
+    var preferredTab: Tab {
+        if isEnabled(.mixer) { return .mixer }
+        if isEnabled(.home) { return .home }
+        return enabledTabs[0]
+    }
 
     // MARK: Opening and closing
 

@@ -35,10 +35,6 @@ final class AgentMonitor: ObservableObject {
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         folder = support.appendingPathComponent("NotchBar/agents", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        watcher = FileWatcher(paths: [folder.path], latency: 0.4) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
-        }
-        watcher?.start()
         timer = EfficientTimer(interval: 8, tolerance: 2) { [weak self] in
             MainActor.assumeIsolated { self?.refresh() }
         }
@@ -50,12 +46,20 @@ final class AgentMonitor: ObservableObject {
     }
 
     func setActive(_ on: Bool) {
+        guard on != active else { return }
         active = on
         if on {
+            if watcher == nil {
+                watcher = FileWatcher(paths: [folder.path], latency: 0.4) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.refresh() }
+                }
+                watcher?.start()
+            }
             timer?.start()
             refresh()
         } else {
             timer?.stop()
+            watcher = nil
         }
     }
 

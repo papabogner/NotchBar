@@ -47,6 +47,17 @@ final class AppVolumeMixer: ObservableObject {
     @Published private(set) var duckAppID: String?
     /// Applies the saved level, mute, and output when that app plays, without waiting for a slider.
     @Published private(set) var autoApply = false
+    /// Idle apps stay off the strip until this is on. They stay greyed out.
+    @Published var showSilentApps = false {
+        didSet {
+            guard !isPreview else { return }
+            UserDefaults.standard.set(showSilentApps, forKey: "showSilentApps")
+        }
+    }
+    /// 0 is app A, 1 is app B. Equal-power, and only a multiplier on each app's own level.
+    @Published private(set) var crossfade = 0.5
+    @Published private(set) var crossA: String?
+    @Published private(set) var crossB: String?
     /// Extra bundles that count as the call, such as a browser tab on Meet. Set after init.
     var additionalCallBundles: @MainActor () -> Set<String> = { [] }
     private var duckGain: [String: Float] = [:]
@@ -70,6 +81,7 @@ final class AppVolumeMixer: ObservableObject {
     private var outputToken: UUID?
     private var volumeToken: UUID?
     private var syncing = false
+    private var assigningPair = false
     /// Type-erased so the tap engine, which needs macOS 14.4, isn't stored on this class.
     private var engineBox: Any?
 
@@ -123,6 +135,7 @@ final class AppVolumeMixer: ObservableObject {
         duckBrowserMeet = UserDefaults.standard.bool(forKey: Self.duckMeetKey)
         duckAppID = UserDefaults.standard.string(forKey: Self.duckAppKey)
         autoApply = UserDefaults.standard.bool(forKey: Self.autoApplyKey)
+        showSilentApps = UserDefaults.standard.bool(forKey: "showSilentApps")
     }
 
     func setDucking(_ on: Bool) {
@@ -225,6 +238,67 @@ final class AppVolumeMixer: ObservableObject {
             refreshMaster()
         }
         updateHooks()
+    }
+
+    func setShowSilent(_ on: Bool) {
+        showSilentApps = on
+    }
+
+    /// Moves the crossfader. The saved level of each app stays as it was.
+    func setCrossfade(_ value: Double) {
+        guard !isPreview else { return }
+        let next = min(1, max(0, value))
+        guard abs(next - crossfade) > 0.0005 else { return }
+        crossfade = next
+        syncTaps()
+    }
+
+    func setCrossA(_ id: String?) {
+        guard !isPreview else { return }
+        crossA = id
+        if let id, crossB == id { crossB = nil }
+        syncTaps()
+    }
+
+    func setCrossB(_ id: String?) {
+        guard !isPreview else { return }
+        crossB = id
+        if let id, crossA == id { crossA = nil }
+        syncTaps()
+    }
+
+    /// Fills an empty side with a playing app, loudest fader first. A later choice is left alone.
+    private func assignDefaultCrossPairIfNeeded() {
+        guard isVisible, !assigningPair else { return }
+        let loud = rows.filter(\.playing).sorted { lhs, rhs in
+            if lhs.level != rhs.level { return lhs.level > rhs.level }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        var changed = false
+        if crossA == nil, let id = loud.first?.id {
+            crossA = id
+            changed = true
+        }
+        if crossB == nil, let id = loud.first(where: { $0.id != crossA })?.id {
+            crossB = id
+            changed = true
+        }
+        guard changed else { return }
+        assigningPair = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.assigningPair = false
+                self.syncTaps()
+            }
+        }
+    }
+
+    /// Equal-power multipliers. Empty until the mixer has chosen two apps, so a cold launch stays idle.
+    private var crossGains: [String: Float] {
+        guard let a = crossA, let b = crossB, a != b else { return [:] }
+        let t = Float(min(1, max(0, crossfade)))
+        return [a: cos(t * .pi / 2), b: sin(t * .pi / 2)]
     }
 
     func setMasterLevel(_ level: Int) {
@@ -383,6 +457,7 @@ final class AppVolumeMixer: ObservableObject {
         if soloID != nil { return true }
         if !routes.isEmpty { return true }
         if !duckGain.isEmpty { return true }
+        if crossGains.values.contains(where: { $0 < 0.999 }) { return true }
         let savedWants = saved.contains { $0.value.muted || $0.value.level != 100 }
         if autoApply && savedWants { return true }
         return engaged && savedWants
@@ -400,7 +475,7 @@ final class AppVolumeMixer: ObservableObject {
                 mixerLog.info("processes \(group.app.name, privacy: .public) \(self.activity.mixerProcessDetail(group.processObjects), privacy: .public)")
             }
             var gone: [String] = []
-            engine().sync(saved: saved, groups: groups, permissionDenied: permissionDenied, solo: soloID, routes: routes, duck: duckGain) { gone.append($0) }
+            engine().sync(saved: saved, groups: groups, permissionDenied: permissionDenied, solo: soloID, routes: routes, duck: duckGain, cross: crossGains) { gone.append($0) }
             if !gone.isEmpty {
                 for id in gone { routes.removeValue(forKey: id) }
                 persistRoutes()
@@ -523,6 +598,7 @@ final class AppVolumeMixer: ObservableObject {
         for id in next.filter(\.playing).map(\.id).reversed() { rememberRecent(id) }
         rows = next
         showSavedHint = isVisible && !engaged && rows.contains { $0.level != 100 || $0.muted }
+        assignDefaultCrossPairIfNeeded()
     }
 
     /// Strips for Home: apps Core Audio says are playing, same as the green dot on the Mixer tab.
@@ -663,11 +739,11 @@ final class AppVolumeMixer: ObservableObject {
         }
 
         func sync(saved: [String: SavedLevel], groups: [PlayingProcessGroup], permissionDenied: Bool, solo: String?,
-                  routes: [String: String], duck: [String: Float], onDeviceGone: (String) -> Void) {
+                  routes: [String: String], duck: [String: Float], cross: [String: Float], onDeviceGone: (String) -> Void) {
             var playing: [String: PlayingProcessGroup] = [:]
             for group in groups { playing[group.app.bundleID] = group }
             for id in Array(taps.keys) {
-                let keep = playing[id].map { wantsTap(id: id, level: saved[id], solo: solo, route: routes[id], duck: duck[id]) && !suppressed.contains(id) && taps[id]?.matches($0.processObjects, preferredUID: routes[id]) == true } ?? false
+                let keep = playing[id].map { wantsTap(id: id, level: saved[id], solo: solo, route: routes[id], duck: duck[id], cross: cross[id]) && !suppressed.contains(id) && taps[id]?.matches($0.processObjects, preferredUID: routes[id]) == true } ?? false
                 if !keep {
                     taps[id]?.stop()
                     taps.removeValue(forKey: id)
@@ -676,8 +752,8 @@ final class AppVolumeMixer: ObservableObject {
             guard !permissionDenied else { return }
             for group in groups {
                 let id = group.app.bundleID
-                guard wantsTap(id: id, level: saved[id], solo: solo, route: routes[id], duck: duck[id]), !suppressed.contains(id) else { continue }
-                let gain = gainValue(id: id, level: saved[id], solo: solo, duck: duck[id])
+                guard wantsTap(id: id, level: saved[id], solo: solo, route: routes[id], duck: duck[id], cross: cross[id]), !suppressed.contains(id) else { continue }
+                let gain = gainValue(id: id, level: saved[id], solo: solo, duck: duck[id], cross: cross[id])
                 if let existing = taps[id], existing.matches(group.processObjects, preferredUID: routes[id]) {
                     if existing.hasFault {
                         fail(id, permission: false, detail: "The audio callback failed.")
@@ -714,7 +790,8 @@ final class AppVolumeMixer: ObservableObject {
         func clearSuppression() { suppressed.removeAll() }
         func unsuppress(_ id: String) { suppressed.remove(id) }
 
-        private func wantsTap(id: String, level: SavedLevel?, solo: String?, route: String?, duck: Float?) -> Bool {
+        private func wantsTap(id: String, level: SavedLevel?, solo: String?, route: String?, duck: Float?, cross: Float?) -> Bool {
+            if let cross, cross < 0.999 { return true }
             if let solo, solo != id { return true }
             if duck != nil { return true }
             if route != nil { return true }
@@ -722,11 +799,22 @@ final class AppVolumeMixer: ObservableObject {
             return level.muted || level.level != 100
         }
 
-        private func gainValue(id: String, level: SavedLevel?, solo: String?, duck: Float?) -> Float {
-            if let solo, solo != id { return 0 }
-            if let duck { return min(1.5, max(0, duck)) }
-            guard let level, !level.muted else { return 0 }
-            return min(1.5, max(0, Float(level.level) / 100))
+        private func gainValue(id: String, level: SavedLevel?, solo: String?, duck: Float?, cross: Float?) -> Float {
+            let own: Float
+            if let solo, solo != id {
+                own = 0
+            } else if let duck {
+                own = min(1.5, max(0, duck))
+            } else if let level {
+                own = level.muted ? 0 : min(1.5, max(0, Float(level.level) / 100))
+            } else if cross != nil {
+                // No saved level means the app is still at its own 100%.
+                own = 1
+            } else {
+                own = 0
+            }
+            guard let cross else { return own }
+            return min(1.5, max(0, own * cross))
         }
 
         private func fail(_ id: String, permission: Bool, detail: String) {

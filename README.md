@@ -90,11 +90,11 @@ Banners drop from the notch for a moment, then tuck back in.
 </td><td><img src="docs/screenshots/21-activity.png" alt="Activity tab with CPU and memory rings, network and disk rates, and the top processes"></td></tr>
 <tr><td colspan="2">
 
-**Mixer.** Faders for the system output and for each app that can play, on macOS 14.4 and later. Apps that are playing come first; idle ones are dimmed. The chevron under a strip picks an output, including AirPlay devices macOS is exposing. The master chevron changes the system output. A chosen device is remembered per app, and that app is tapped even at 100% so the sound can go there. If the device disappears, the app falls back to the default. At 100% with no custom output an app is left alone, and nothing is recorded or stored. Hide the tab from **… > Show Tabs**.
+**Mixer.** This is the view the notch opens on. Faders are rounded pills, about 32 pt wide, for the system output and for each app that is playing, on macOS 14.4 and later. Idle apps are hidden until **Stumme Apps zeigen**, and then they stay grey. A crossfader under the strips blends two apps (the two loudest, until you pick others) with an equal-power curve, on top of each app's own level. The chevron under a strip picks an output, including AirPlay devices macOS is exposing. The master chevron changes the system output. A chosen device is remembered per app, and that app is tapped even at 100% so the sound can go there. If the device disappears, the app falls back to the default. At 100% with no custom output and no crossfade an app is left alone, and nothing is recorded or stored.
 
-**Home.** The notch opens here. The song sits on the left; System and the apps that are playing sit on the right as equal faders. If Core Audio has not marked an app yet, the Now Playing app is shown instead. Weather is a small chip. Claude, an agent, or a timer is one line when there is something to say. **… > Customize Home** turns cards on and reorders them. **… > Mixer on Hover** is off, so hover opens Home; turn it on to open the Mixer instead.
+**Home.** Still there, from the tab bar. The song sits on the left; System and the apps that are playing sit on the right. If Core Audio has not marked an app yet, the Now Playing app is shown instead. Weather is a small chip. Claude, an agent, or a timer is one line when that extra is on and there is something to say. **… > Customize Home** turns cards on and reorders them. Hover opens the Mixer. Turn **Mixer beim Darüberfahren** off in Einstellungen to open Home instead.
 
-**Ticker.** Off until you turn it on in **Einstellungen → Ticker**. Sources are separate switches. **Dieser Mac** writes short German lines (an agent working, the app you have focused, new downloads, the Mac mini, a low battery, what is playing). Drop extra lines in as JSON files in `~/Library/Application Support/NotchBar/ticker/`:
+**Ticker.** Off until **Einstellungen → Allgemein → Extras (Leistung)**. The detailed source switches appear after that. Sources are separate switches. **Dieser Mac** writes short German lines (an agent working, the app you have focused, new downloads, the Mac mini, a low battery, what is playing). Drop extra lines in as JSON files in `~/Library/Application Support/NotchBar/ticker/`:
 
 ```json
 {"items":[{"text":"Build fertig: NotchBar.app","source":"build","priority":60,"url":"https://example.com","expires":"2026-11-24T18:00:00Z"}]}
@@ -133,9 +133,9 @@ Banners drop from the notch for a moment, then tuck back in.
 - **File Shelf.** Off until **… > File Shelf**. Drop files on the open notch to park them, click one to show it in Finder, or drag it back out.
 - **Ducking.** Off until **… > Duck Other Apps**. Zoom, Teams, FaceTime, Webex, an optional browser Meet tab, or one chosen app lowers everything else to a quarter, then restores it.
 - **Saved volumes.** **… > Apply Saved Volumes** puts an app back to its saved level, mute, and output when it starts playing. Off, a saved level still waits until you move that fader. An output chosen on a strip is remembered either way.
-- **Spotify Connect.** Off until **… > Spotify Connect**. Setup is in [Spotify Connect](#spotify-connect).
-- **Mac mini.** Off until **… > Mac mini Status**. **… > Mac mini…** sets the SSH alias (default `mini`). NotchBar runs `ssh -o BatchMode=yes` about once a minute while Home or the Mac mini ticker source is showing.
-- **Portfolio.** Off until **… > Show Portfolio**. Holdings live in `~/Library/Application Support/NotchBar/portfolio.json`. **… > Portfolio › Edit Holdings…** creates a placeholder file (those amounts are examples, not yours) and opens it. Prices come from CoinGecko about every five minutes. A file `portfolio-status.json` in the same folder, with `total`, `change24hPct`, and `note`, replaces the calculated total when another tool writes it.
+- **Spotify Connect.** Off until **Extras (Leistung)**. Setup is in [Spotify Connect](#spotify-connect). It polls only while that switch is on and the notch is open.
+- **Mac mini.** Off until **Extras (Leistung)**. **Einstellungen → Integrationen** sets the SSH alias (default `mini`) once the switch is on. NotchBar runs `ssh -o BatchMode=yes` about once a minute while Home or the Mac mini ticker source is showing.
+- **Portfolio.** Off until **Extras (Leistung)**. Holdings live in `~/Library/Application Support/NotchBar/portfolio.json`. **… > Portfolio › Edit Holdings…** creates a placeholder file (those amounts are examples, not yours) and opens it. Prices come from CoinGecko about every five minutes. A file `portfolio-status.json` in the same folder, with `total`, `change24hPct`, and `note`, replaces the calculated total when another tool writes it.
 - **New audio.** **… > Expand on New Audio** is off, including if you already had NotchBar. A new track or app does not drop the now-playing banner or widen the closed notch. Turn it on for the old peek. Agent done and waiting banners are unchanged.
 
 </details>
@@ -214,7 +214,7 @@ Detecting which app is playing, dictation and headphones need no permission at a
 
 ## Spotify Connect
 
-Off until **… > Spotify Connect**. NotchBar then lists the devices on your Spotify account, on the Spotify fader and under Now Playing. Tap one to move playback there. If the active device is a speaker or a phone rather than this Mac, a small volume slider controls that device.
+Off until **Extras (Leistung) → Spotify Connect**. NotchBar then lists the devices on your Spotify account, on the Spotify fader and under Now Playing. Tap one to move playback there. If the active device is a speaker or a phone rather than this Mac, a small volume slider controls that device.
 
 Spotify needs a free app that you create. There is no shared client secret.
 
@@ -224,14 +224,13 @@ Spotify needs a free app that you create. There is no shared client secret.
    `http://127.0.0.1:47321/callback`
 
 3. Copy the Client ID.
-4. In the notch, choose **… > Spotify Connect…**, paste the Client ID, and click **Sign in**.
-5. Turn on **… > Spotify Connect**.
+4. Turn on **Extras (Leistung) → Spotify Connect**, open **Einstellungen → Integrationen**, paste the Client ID, and click **Anmelden**.
 
 Sign-in uses Authorization Code with PKCE. The browser comes back to NotchBar on `127.0.0.1` port `47321`, and the tokens are stored in the Keychain. A 403 from Spotify, which is what a free account gets for Connect, shows “Spotify Connect needs a Premium account.”
 
 ## Connect Claude Code
 
-NotchBar works with Claude Code out of the box. It estimates your usage from the transcripts Claude Code keeps in `~/.claude/projects`.
+Claude usage stays off until **Extras (Leistung) → Claude-Nutzung**. Until then NotchBar does not read `~/.claude/projects`. After you turn it on, it estimates usage from the transcripts Claude Code keeps there.
 
 **For live limits and instant activity, connect it once:**
 
@@ -243,7 +242,7 @@ Connecting adds two small scripts to `~/.claude/settings.json`, and saves a back
 
 ## Agent status
 
-Turn on the **Agents** card in Customize Home, or the **Agents** ticker source, and NotchBar watches Claude Code and Codex. A running `claude` or `codex` process, or a transcript written in the last couple of minutes, shows as working or done. A status file is more precise: it can say the agent is waiting for you. When that changes to done or needs you, the notch plays a short chime and shows a brief banner.
+Off until **Extras (Leistung) → Agentenstatus**. With that on, the Agents card or the Agents ticker source watches Claude Code and Codex. The file watcher and the process check stay stopped until then. A running `claude` or `codex` process, or a transcript written in the last couple of minutes, shows as working or done. A status file is more precise: it can say the agent is waiting for you. When that changes to done or needs you, the notch plays a short chime and shows a brief banner.
 
 Status files live in `~/Library/Application Support/NotchBar/agents/`. Any `*.json` file is read:
 
@@ -364,7 +363,7 @@ flowchart LR
 - **The pointer costs nothing until it reaches the notch.** A nearly invisible sensor window over the notch gets one event when the pointer arrives. NotchBar follows the pointer only while it's on the notch or the notch is open.
 - **Animations run in the compositor.** The window server animates the waves and the Claude spinner with no CPU from NotchBar.
 - **Everything pauses** while the displays sleep or the Mac is locked.
-- **Incremental reads.** Transcripts are append-only, so only new lines are read.
+- **Incremental reads.** Transcripts are append-only, so only new lines are read. The scan does not run at launch. It starts only after **Extras (Leistung) → Claude-Nutzung**.
 
 <details>
 <summary><b>Notes on macOS quirks, for contributors</b></summary>
