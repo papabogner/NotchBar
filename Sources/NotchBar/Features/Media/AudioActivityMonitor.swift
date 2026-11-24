@@ -3,14 +3,14 @@ import CoreAudio
 import Darwin
 
 /// An app that is currently sending sound to an output device.
-struct AudioApp: Equatable {
+struct AudioApp: Equatable, Sendable {
     let bundleID: String
     let name: String
 }
 
 /// One playing app and the Core Audio process objects behind it, helpers included.
 /// Process taps take these object IDs, not PIDs.
-struct PlayingProcessGroup: Equatable {
+struct PlayingProcessGroup: Equatable, Sendable {
     var app: AudioApp
     var processObjects: [AudioObjectID]
 }

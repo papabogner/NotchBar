@@ -80,8 +80,16 @@ final class AppVolumeMixer: ObservableObject {
     private var playbackToken: UUID?
     private var outputToken: UUID?
     private var volumeToken: UUID?
-    private var syncing = false
-    private var assigningPair = false
+    /// The crossfader is drawn before it changes any audio. Taps wait for a move or an explicit pick.
+    private var crossfadeEngaged = false
+    /// Coalesces tap work. A burst of slider moves becomes one pass.
+    private var syncArmed = false
+    /// A job is on the engine queue. Further changes wait, so taps cannot pile up behind a slow coreaudiod.
+    private var syncInFlight = false
+    private var syncDirty = false
+    /// The next pass recreates every tap, used when the default output changes.
+    private var rebuildNext = false
+    private let syncDelay: TimeInterval = 0.15
     /// Type-erased so the tap engine, which needs macOS 14.4, isn't stored on this class.
     private var engineBox: Any?
 
@@ -214,7 +222,7 @@ final class AppVolumeMixer: ObservableObject {
     var debugSummary: String {
         let taps: Int
         if #available(macOS 14.4, *) {
-            taps = (engineBox as? Engine)?.tapCount ?? 0
+            taps = (engineBox as? MixerEngine)?.tapCount ?? 0
         } else {
             taps = 0
         }
@@ -245,16 +253,19 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     /// Moves the crossfader. The saved level of each app stays as it was.
+    /// Leaving center is what arms the taps. Sitting at the default does not.
     func setCrossfade(_ value: Double) {
         guard !isPreview else { return }
         let next = min(1, max(0, value))
         guard abs(next - crossfade) > 0.0005 else { return }
+        if abs(next - 0.5) > 0.0005 { crossfadeEngaged = true }
         crossfade = next
         syncTaps()
     }
 
     func setCrossA(_ id: String?) {
         guard !isPreview else { return }
+        if id != nil { crossfadeEngaged = true }
         crossA = id
         if let id, crossB == id { crossB = nil }
         syncTaps()
@@ -262,43 +273,26 @@ final class AppVolumeMixer: ObservableObject {
 
     func setCrossB(_ id: String?) {
         guard !isPreview else { return }
+        if id != nil { crossfadeEngaged = true }
         crossB = id
         if let id, crossA == id { crossA = nil }
         syncTaps()
     }
 
-    /// Fills an empty side with a playing app, loudest fader first. A later choice is left alone.
+    /// Fills empty menus with the loudest playing apps. Does not start taps.
     private func assignDefaultCrossPairIfNeeded() {
-        // Hotfix: auto-pairing installed taps on the main thread and could hang in coreaudiod. Pair only on explicit choice.
-        return
-        guard isVisible, !assigningPair else { return }
+        guard isVisible, !crossfadeEngaged else { return }
         let loud = rows.filter(\.playing).sorted { lhs, rhs in
             if lhs.level != rhs.level { return lhs.level > rhs.level }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
-        var changed = false
-        if crossA == nil, let id = loud.first?.id {
-            crossA = id
-            changed = true
-        }
-        if crossB == nil, let id = loud.first(where: { $0.id != crossA })?.id {
-            crossB = id
-            changed = true
-        }
-        guard changed else { return }
-        assigningPair = true
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.assigningPair = false
-                self.syncTaps()
-            }
-        }
+        if crossA == nil, let id = loud.first?.id { crossA = id }
+        if crossB == nil, let id = loud.first(where: { $0.id != crossA })?.id { crossB = id }
     }
 
-    /// Equal-power multipliers. Empty until the mixer has chosen two apps, so a cold launch stays idle.
+    /// Equal-power multipliers. Empty until the crossfader is moved or a side is picked.
     private var crossGains: [String: Float] {
-        guard let a = crossA, let b = crossB, a != b else { return [:] }
+        guard crossfadeEngaged, let a = crossA, let b = crossB, a != b else { return [:] }
         let t = Float(min(1, max(0, crossfade)))
         return [a: cos(t * .pi / 2), b: sin(t * .pi / 2)]
     }
@@ -448,7 +442,7 @@ final class AppVolumeMixer: ObservableObject {
         statusMessage = nil
         permissionDenied = false
         needsExplanation = false
-        if #available(macOS 14.4, *) { (engineBox as? Engine)?.unsuppress(bundleID) }
+        if #available(macOS 14.4, *) { (engineBox as? MixerEngine)?.unsuppress(bundleID) }
         publishRows()
         updateHooks()
         syncTaps()
@@ -465,37 +459,81 @@ final class AppVolumeMixer: ObservableObject {
         return engaged && savedWants
     }
 
+    /// Waits out a burst of changes, then applies the latest levels. Never calls Core Audio itself.
     private func syncTaps() {
-        guard !syncing else { return }
-        syncing = true
-        defer { syncing = false }
-        let groups = activity.mixerProcessGroups()
-        if #available(macOS 14.4, *), needsActiveTaps {
-            for group in groups {
-                let level = saved[group.app.bundleID]
-                guard level?.muted == true || (level?.level ?? 100) != 100 else { continue }
-                mixerLog.info("processes \(group.app.name, privacy: .public) \(self.activity.mixerProcessDetail(group.processObjects), privacy: .public)")
+        guard !isPreview else { return }
+        if syncArmed { return }
+        syncArmed = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + syncDelay) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.syncArmed = false
+                self.performSync()
             }
-            var gone: [String] = []
-            engine().sync(saved: saved, groups: groups, permissionDenied: permissionDenied, solo: soloID, routes: routes, duck: duckGain, cross: crossGains) { gone.append($0) }
-            if !gone.isEmpty {
-                for id in gone { routes.removeValue(forKey: id) }
-                persistRoutes()
-                syncing = false
-                syncTaps()
-            }
-        } else if #available(macOS 14.4, *) {
-            (engineBox as? Engine)?.stopAll()
         }
+    }
+
+    /// Snapshots the levels and hands them to the engine queue. The main thread does not wait.
+    private func performSync() {
         publishRows()
+        guard #available(macOS 14.4, *) else { return }
+        if syncInFlight {
+            syncDirty = true
+            return
+        }
+        let rebuild = rebuildNext
+        rebuildNext = false
+        guard needsActiveTaps else {
+            (engineBox as? MixerEngine)?.stopAll()
+            return
+        }
+        syncInFlight = true
+        let job = MixerEngine.Job(
+            saved: saved.mapValues { MixerEngine.Level(level: $0.level, muted: $0.muted) },
+            groups: activity.mixerProcessGroups(),
+            permissionDenied: permissionDenied,
+            solo: soloID,
+            routes: routes,
+            duck: duckGain,
+            cross: crossGains,
+            rebuild: rebuild
+        )
+        engine().submit(job)
+    }
+
+    /// A missing output or a failed tap, delivered on the main actor after the engine queue finishes.
+    fileprivate func applyEngine(_ outcome: MixerEngine.Outcome) {
+        if outcome.completesSync { syncInFlight = false }
+        var again = false
+        if !outcome.deviceGone.isEmpty {
+            for id in outcome.deviceGone { routes.removeValue(forKey: id) }
+            persistRoutes()
+            again = true
+        }
+        for problem in outcome.problems {
+            let name = rows.first { $0.id == problem.id }?.name ?? "That app"
+            mixerLog.error("mixer \(name, privacy: .public) \(problem.detail, privacy: .public)")
+            if problem.permission {
+                permissionDenied = true
+                statusMessage = "\(name): \(problem.detail)"
+                continue
+            }
+            saved.removeValue(forKey: problem.id)
+            persist()
+            statusMessage = "Couldn't change \(name). \(problem.detail) Left at normal volume."
+            publishRows()
+            updateHooks()
+        }
+        if outcome.completesSync && syncDirty {
+            syncDirty = false
+            again = true
+        }
+        if again { syncTaps() }
     }
 
     private func rebind() {
-        guard needsActiveTaps, !permissionDenied else { return }
         guard #available(macOS 14.4, *) else { return }
-        let engine = engine()
-        engine.clearSuppression()
-        engine.stopAll()
+        rebuildNext = true
         syncTaps()
     }
 
@@ -655,7 +693,7 @@ final class AppVolumeMixer: ObservableObject {
         }
         persistRoutes()
         statusMessage = nil
-        if #available(macOS 14.4, *) { (engineBox as? Engine)?.unsuppress(bundleID) }
+        if #available(macOS 14.4, *) { (engineBox as? MixerEngine)?.unsuppress(bundleID) }
         publishRows()
         updateHooks()
         syncTaps()
@@ -702,156 +740,255 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     @available(macOS 14.4, *)
-    private func engine() -> Engine {
-        if let existing = engineBox as? Engine { return existing }
-        let created = Engine { [weak self] bundleID, permission, detail in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let name = self.rows.first { $0.id == bundleID }?.name ?? "That app"
-                mixerLog.error("mixer \(name, privacy: .public) \(detail, privacy: .public)")
-                if permission {
-                    self.permissionDenied = true
-                    self.statusMessage = "\(name): \(detail)"
-                    return
-                }
-                // The slider was ahead of the audio. Put it back so it doesn't claim a level we aren't applying.
-                self.saved.removeValue(forKey: bundleID)
-                self.persist()
-                self.statusMessage = "Couldn't change \(name). \(detail) Left at normal volume."
-                self.publishRows()
-                self.updateHooks()
-            }
-        }
+    private func engine() -> MixerEngine {
+        if let existing = engineBox as? MixerEngine { return existing }
+        let created = MixerEngine(mixer: self)
         engineBox = created
         return created
     }
+}
 
-    /// Taps for the apps the user has turned down. Created only on macOS 14.4+.
-    @available(macOS 14.4, *)
-    @MainActor
-    private final class Engine {
-        var onProblem: (String, Bool, String) -> Void
-        private var taps: [String: ProcessVolumeTap] = [:]
-        private var suppressed: Set<String> = []
-        private var healthScheduled = false
-        var tapCount: Int { taps.count }
+/// Carries a finished engine pass back to the main actor. The mixer reference is only used on the main thread.
+@available(macOS 14.4, *)
+private final class MixerEngineHop: @unchecked Sendable {
+    private final class Ref: @unchecked Sendable {
+        // Read only on the main thread, inside MainActor.assumeIsolated.
+        nonisolated(unsafe) weak var mixer: AppVolumeMixer?
+    }
 
-        init(onProblem: @escaping (String, Bool, String) -> Void) {
-            self.onProblem = onProblem
+    private let ref = Ref()
+
+    init(_ mixer: AppVolumeMixer) {
+        ref.mixer = mixer
+    }
+
+    func send(_ outcome: MixerEngine.Outcome) {
+        let ref = ref
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { ref.mixer?.applyEngine(outcome) }
         }
+    }
+}
 
-        func sync(saved: [String: SavedLevel], groups: [PlayingProcessGroup], permissionDenied: Bool, solo: String?,
-                  routes: [String: String], duck: [String: Float], cross: [String: Float], onDeviceGone: (String) -> Void) {
-            var playing: [String: PlayingProcessGroup] = [:]
-            for group in groups { playing[group.app.bundleID] = group }
-            for id in Array(taps.keys) {
-                let keep = playing[id].map { wantsTap(id: id, level: saved[id], solo: solo, route: routes[id], duck: duck[id], cross: cross[id]) && !suppressed.contains(id) && taps[id]?.matches($0.processObjects, preferredUID: routes[id]) == true } ?? false
-                if !keep {
-                    taps[id]?.stop()
-                    taps.removeValue(forKey: id)
+/// Owns process taps. Every Core Audio create, start, stop, and destroy runs on `queue`, never on the main thread.
+@available(macOS 14.4, *)
+private final class MixerEngine: @unchecked Sendable {
+    struct Level: Sendable {
+        var level: Int
+        var muted: Bool
+    }
+
+    struct Job: Sendable {
+        var saved: [String: Level]
+        var groups: [PlayingProcessGroup]
+        var permissionDenied: Bool
+        var solo: String?
+        var routes: [String: String]
+        var duck: [String: Float]
+        var cross: [String: Float]
+        var rebuild: Bool
+    }
+
+    struct Problem: Sendable {
+        var id: String
+        var permission: Bool
+        var detail: String
+    }
+
+    struct Outcome: Sendable {
+        var deviceGone: [String] = []
+        var problems: [Problem] = []
+        /// This pass was a full sync, so the main actor can start the next one.
+        var completesSync = false
+    }
+
+    private let queue = DispatchQueue(label: "com.local.notchbar.mixer-engine")
+    private let hop: MixerEngineHop
+    /// Touched only on `queue`.
+    private var taps: [String: ProcessVolumeTap] = [:]
+    private var suppressed: Set<String> = []
+    private var healthScheduled = false
+    private let countLock = NSLock()
+    private var liveTaps = 0
+
+    var tapCount: Int {
+        countLock.lock()
+        defer { countLock.unlock() }
+        return liveTaps
+    }
+
+    init(mixer: AppVolumeMixer) {
+        hop = MixerEngineHop(mixer)
+    }
+
+    func submit(_ job: Job) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            var outcome = self.apply(job)
+            outcome.completesSync = true
+            self.noteCount()
+            self.hop.send(outcome)
+        }
+    }
+
+    func stopAll() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.stopAllOnQueue()
+            self.noteCount()
+        }
+    }
+
+    func unsuppress(_ id: String) {
+        let id = id
+        queue.async { [weak self] in
+            self?.suppressed.remove(id)
+        }
+    }
+
+    deinit {
+        // Hand the taps to the queue before this dictionary releases them, so stop() does not run here.
+        let transferred = taps
+        taps = [:]
+        queue.async {
+            for tap in transferred.values { tap.stop() }
+        }
+    }
+
+    private func publish(_ outcome: Outcome) {
+        guard !outcome.deviceGone.isEmpty || !outcome.problems.isEmpty else { return }
+        hop.send(outcome)
+    }
+
+    private func apply(_ job: Job) -> Outcome {
+        if job.rebuild {
+            suppressed.removeAll()
+            stopAllOnQueue()
+        }
+        var outcome = Outcome()
+        var playing: [String: PlayingProcessGroup] = [:]
+        for group in job.groups { playing[group.app.bundleID] = group }
+        for id in Array(taps.keys) {
+            let keep = playing[id].map {
+                wantsTap(id: id, level: job.saved[id], solo: job.solo, route: job.routes[id], duck: job.duck[id], cross: job.cross[id])
+                    && !suppressed.contains(id)
+                    && taps[id]?.matches($0.processObjects, preferredUID: job.routes[id]) == true
+            } ?? false
+            if !keep { drop(id) }
+        }
+        guard !job.permissionDenied else { return outcome }
+        for group in job.groups {
+            let id = group.app.bundleID
+            guard wantsTap(id: id, level: job.saved[id], solo: job.solo, route: job.routes[id], duck: job.duck[id], cross: job.cross[id]),
+                  !suppressed.contains(id) else { continue }
+            let gain = gainValue(id: id, level: job.saved[id], solo: job.solo, duck: job.duck[id], cross: job.cross[id])
+            if let existing = taps[id], existing.matches(group.processObjects, preferredUID: job.routes[id]) {
+                if existing.hasFault {
+                    outcome.problems.append(fail(id, permission: false, detail: "The audio callback failed."))
+                } else {
+                    existing.setGain(gain)
                 }
+                continue
             }
-            guard !permissionDenied else { return }
-            for group in groups {
-                let id = group.app.bundleID
-                guard wantsTap(id: id, level: saved[id], solo: solo, route: routes[id], duck: duck[id], cross: cross[id]), !suppressed.contains(id) else { continue }
-                let gain = gainValue(id: id, level: saved[id], solo: solo, duck: duck[id], cross: cross[id])
-                if let existing = taps[id], existing.matches(group.processObjects, preferredUID: routes[id]) {
-                    if existing.hasFault {
-                        fail(id, permission: false, detail: "The audio callback failed.")
-                    } else {
-                        existing.setGain(gain)
-                    }
+            drop(id)
+            let detail = "\(group.app.name) [\(group.processObjects.map(String.init).joined(separator: ","))]"
+            mixerLog.info("starting \(detail, privacy: .public) gain=\(gain, privacy: .public)")
+            switch ProcessVolumeTap.start(processObjects: group.processObjects, gain: gain, label: group.app.name, outputUID: job.routes[id]) {
+            case .success(let tap):
+                taps[id] = tap
+                scheduleHealthCheck()
+            case .failure(let error):
+                if case .deviceMissing = error {
+                    outcome.deviceGone.append(id)
                     continue
                 }
-                taps[id]?.stop()
-                taps[id] = nil
-                let detail = "\(group.app.name) [\(group.processObjects.map(String.init).joined(separator: ","))]"
-                mixerLog.info("starting \(detail, privacy: .public) gain=\(gain, privacy: .public)")
-                switch ProcessVolumeTap.start(processObjects: group.processObjects, gain: gain, label: group.app.name, outputUID: routes[id]) {
-                case .success(let tap):
-                    taps[id] = tap
-                    scheduleHealthCheck()
-                case .failure(let error):
-                    if case .deviceMissing = error {
-                        onDeviceGone(id)
-                        continue
-                    }
-                    fail(id, permission: error.isPermission, detail: error.summary)
-                    // One denial applies to every app. Don't open a tap on the next one.
-                    if error.isPermission { return }
-                }
+                outcome.problems.append(fail(id, permission: error.isPermission, detail: error.summary))
+                if error.isPermission { return outcome }
             }
         }
+        return outcome
+    }
 
-        func stopAll() {
-            for tap in taps.values { tap.stop() }
-            taps.removeAll()
+    private func drop(_ id: String) {
+        taps[id]?.stop()
+        taps.removeValue(forKey: id)
+    }
+
+    private func stopAllOnQueue() {
+        for tap in taps.values { tap.stop() }
+        taps.removeAll()
+    }
+
+    private func noteCount() {
+        let count = taps.count
+        countLock.lock()
+        liveTaps = count
+        countLock.unlock()
+    }
+
+    /// A route, a duck, a real crossfade pull, solo, mute, or a level other than 100%.
+    /// Gain 1.0 with none of those leaves the app on its own stream.
+    private func wantsTap(id: String, level: Level?, solo: String?, route: String?, duck: Float?, cross: Float?) -> Bool {
+        if route != nil { return true }
+        if duck != nil { return true }
+        if let cross, cross < 0.999 { return true }
+        if let solo, solo != id { return true }
+        guard let level, level.muted || level.level != 100 else { return false }
+        let gain = gainValue(id: id, level: level, solo: solo, duck: duck, cross: cross)
+        return abs(gain - 1) >= 0.001
+    }
+
+    private func gainValue(id: String, level: Level?, solo: String?, duck: Float?, cross: Float?) -> Float {
+        let own: Float
+        if let solo, solo != id {
+            own = 0
+        } else if let duck {
+            own = min(1.5, max(0, duck))
+        } else if let level {
+            own = level.muted ? 0 : min(1.5, max(0, Float(level.level) / 100))
+        } else if let cross, cross < 0.999 {
+            own = 1
+        } else {
+            own = 0
         }
+        guard let cross, cross < 0.999 else { return own }
+        return min(1.5, max(0, own * cross))
+    }
 
-        func clearSuppression() { suppressed.removeAll() }
-        func unsuppress(_ id: String) { suppressed.remove(id) }
+    private func fail(_ id: String, permission: Bool, detail: String) -> Problem {
+        drop(id)
+        suppressed.insert(id)
+        return Problem(id: id, permission: permission, detail: detail)
+    }
 
-        private func wantsTap(id: String, level: SavedLevel?, solo: String?, route: String?, duck: Float?, cross: Float?) -> Bool {
-            if let cross, cross < 0.999 { return true }
-            if let solo, solo != id { return true }
-            if duck != nil { return true }
-            if route != nil { return true }
-            guard let level else { return false }
-            return level.muted || level.level != 100
-        }
-
-        private func gainValue(id: String, level: SavedLevel?, solo: String?, duck: Float?, cross: Float?) -> Float {
-            let own: Float
-            if let solo, solo != id {
-                own = 0
-            } else if let duck {
-                own = min(1.5, max(0, duck))
-            } else if let level {
-                own = level.muted ? 0 : min(1.5, max(0, Float(level.level) / 100))
-            } else if cross != nil {
-                // No saved level means the app is still at its own 100%.
-                own = 1
-            } else {
-                own = 0
+    /// A tap that never delivers a buffer, or faults, would leave the app silent. Drop it.
+    private func scheduleHealthCheck() {
+        guard !healthScheduled else { return }
+        healthScheduled = true
+        queue.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self else { return }
+            self.healthScheduled = false
+            let outcome = self.retireUnhealthy()
+            if self.taps.contains(where: { Date().timeIntervalSince($0.value.createdAt) < 0.8 && !$0.value.healthChecked }) {
+                self.scheduleHealthCheck()
             }
-            guard let cross else { return own }
-            return min(1.5, max(0, own * cross))
+            self.noteCount()
+            self.publish(outcome)
         }
+    }
 
-        private func fail(_ id: String, permission: Bool, detail: String) {
-            taps[id]?.stop()
-            taps.removeValue(forKey: id)
-            suppressed.insert(id)
-            onProblem(id, permission, detail)
-        }
-
-        /// A tap that never delivers a buffer, or faults, would leave the app silent. Drop it.
-        private func scheduleHealthCheck() {
-            guard !healthScheduled else { return }
-            healthScheduled = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.healthScheduled = false
-                    self.retireUnhealthy()
-                    if self.taps.contains(where: { Date().timeIntervalSince($0.value.createdAt) < 0.8 && !$0.value.healthChecked }) {
-                        self.scheduleHealthCheck()
-                    }
-                }
+    private func retireUnhealthy() -> Outcome {
+        var outcome = Outcome()
+        let now = Date()
+        for (id, tap) in Array(taps) {
+            guard now.timeIntervalSince(tap.createdAt) >= 0.8, !tap.healthChecked else { continue }
+            tap.healthChecked = true
+            if tap.hasFault || !tap.didRender {
+                mixerLog.error("tap unhealthy \(tap.label, privacy: .public) fault=\(tap.hasFault, privacy: .public) rendered=\(tap.didRender, privacy: .public)")
+                let detail = tap.hasFault ? "The audio format didn't match." : "No audio arrived from the tap."
+                outcome.problems.append(fail(id, permission: false, detail: detail))
             }
         }
-
-        private func retireUnhealthy() {
-            let now = Date()
-            for (id, tap) in Array(taps) {
-                guard now.timeIntervalSince(tap.createdAt) >= 0.8, !tap.healthChecked else { continue }
-                tap.healthChecked = true
-                if tap.hasFault || !tap.didRender {
-                    mixerLog.error("tap unhealthy \(tap.label, privacy: .public) fault=\(tap.hasFault, privacy: .public) rendered=\(tap.didRender, privacy: .public)")
-                    fail(id, permission: false, detail: tap.hasFault ? "The audio format didn't match." : "No audio arrived from the tap.")
-                }
-            }
-        }
+        return outcome
     }
 }

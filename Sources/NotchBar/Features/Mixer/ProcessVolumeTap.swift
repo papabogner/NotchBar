@@ -47,14 +47,16 @@ enum TapStartError: Error, Equatable {
 /// The tap uses `mutedWhenTapped`, so the app's own stream goes silent only while this tap is
 /// actually being read. If anything here fails, or the callback never runs, the tap is destroyed
 /// and the app is audible again at full volume. At 100% the caller does not create a tap at all.
+/// Created, started, and destroyed only on `MixerEngine`'s serial queue.
+/// `setGain`, `didRender`, and `hasFault` are atomic, so the render callback can share them.
 @available(macOS 14.4, *)
-final class ProcessVolumeTap {
+final class ProcessVolumeTap: @unchecked Sendable {
     let processObjects: [AudioObjectID]
     /// Nil plays through the system default. A saved UID plays through that device.
     let preferredUID: String?
     let label: String
     let createdAt = Date()
-    /// Set on the main thread by the health check. The render callback never reads it.
+    /// Set on the engine queue by the health check. The render callback never reads it.
     var healthChecked = false
     private var loggedGain: Float = -1
 
