@@ -502,6 +502,7 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     /// A missing output or a failed tap, delivered on the main actor after the engine queue finishes.
+    @available(macOS 14.4, *)
     fileprivate func applyEngine(_ outcome: MixerEngine.Outcome) {
         if outcome.completesSync { syncInFlight = false }
         var again = false
