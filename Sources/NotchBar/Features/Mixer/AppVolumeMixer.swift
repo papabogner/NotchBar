@@ -269,6 +269,8 @@ final class AppVolumeMixer: ObservableObject {
 
     /// Fills an empty side with a playing app, loudest fader first. A later choice is left alone.
     private func assignDefaultCrossPairIfNeeded() {
+        // Hotfix: auto-pairing installed taps on the main thread and could hang in coreaudiod. Pair only on explicit choice.
+        return
         guard isVisible, !assigningPair else { return }
         let loud = rows.filter(\.playing).sorted { lhs, rhs in
             if lhs.level != rhs.level { return lhs.level > rhs.level }
