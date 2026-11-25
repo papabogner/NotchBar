@@ -315,7 +315,7 @@ final class NotchViewModel: ObservableObject {
         case _ where showsCamera: content = 262
         case .home: content = 252
         case .calendar, .activity: content = 222
-        case .mixer: content = 420
+        case .mixer: content = 360
         default: content = 150
         }
         // A toast gets its own strip below the content instead of covering it.

@@ -7,39 +7,60 @@ struct MixerPanel: View {
     var spotify: SpotifyConnect? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MixerLayout.section) {
             if mixer.needsExplanation {
                 explanation
             } else if mixer.permissionDenied {
                 denied
             } else {
-                HStack {
-                    Text("Mixer")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-                    Spacer(minLength: 8)
-                    sceneMenu
-                }
+                header
                 if mixer.rows.isEmpty {
                     Text("Keine Apps mit Audio")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MixerLayout.secondary)
                 } else if visibleStrips.isEmpty {
                     Text("Gerade spielt nichts. Stumme Apps einblenden, um sie trotzdem zu sehen.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MixerLayout.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 MixerStripRow(mixer: mixer, highlight: highlight, compact: false, spotify: spotify, rows: visibleStrips)
                 CrossfaderBar(mixer: mixer)
             }
             if let status = mixer.statusMessage {
-                Text(status).font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+                Text(status).font(.system(size: 10)).foregroundStyle(MixerLayout.secondary)
                     .lineLimit(3).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .frame(height: 330, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var header: some View {
+        HStack(spacing: MixerLayout.section) {
+            Text("Mixer")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+            Spacer(minLength: MixerLayout.section)
+            HStack(spacing: 8) {
+                silentToggle
+                sceneMenu
+            }
+        }
+    }
+
+    private var silentToggle: some View {
+        Button {
+            mixer.setShowSilent(!mixer.showSilentApps)
+        } label: {
+            Image(systemName: mixer.showSilentApps ? "eye" : "eye.slash")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(mixer.showSilentApps ? 0.92 : 0.55))
+                .frame(width: 28, height: 22)
+                .background(Capsule().fill(.white.opacity(0.1)))
+        }
+        .buttonStyle(.plain)
+        .help("Stumme Apps zeigen")
+        .accessibilityLabel("Stumme Apps zeigen")
     }
 
     private var visibleStrips: [AppVolumeRow] {
@@ -124,18 +145,61 @@ struct MixerStripRow: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: compact ? 8 : 12) {
-                MasterStrip(mixer: mixer, compact: compact)
-                Rectangle().fill(.white.opacity(0.14)).frame(width: 1).padding(.vertical, 6)
-                ForEach(strips) { row in
-                    ChannelStrip(row: row, mixer: mixer, compact: compact, highlighted: row.id == highlight, spotify: spotify)
+        if compact {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 8) {
+                    stripColumns(width: nil)
                 }
             }
-            .padding(.vertical, 2)
+            .frame(height: 168)
+        } else {
+            GeometryReader { geo in
+                let count = strips.count + 1
+                let gap = MixerLayout.section
+                let needed = MixerLayout.minStrip * CGFloat(count) + gap * CGFloat(max(count - 1, 0))
+                if needed > geo.size.width {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: gap) {
+                            stripColumns(width: MixerLayout.minStrip)
+                        }
+                    }
+                } else {
+                    let slots = CGFloat(max(count, 1))
+                    let gaps = CGFloat(max(count - 1, 0))
+                    let capped = MixerLayout.maxStrip * slots + gap * gaps
+                    let width = capped <= geo.size.width
+                        ? MixerLayout.maxStrip
+                        : (geo.size.width - gap * gaps) / slots
+                    let spacing = count > 1 && capped <= geo.size.width
+                        ? (geo.size.width - MixerLayout.maxStrip * slots) / gaps
+                        : gap
+                    HStack(alignment: .top, spacing: spacing) {
+                        stripColumns(width: width)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(height: MixerLayout.stripHeight)
         }
-        .frame(height: compact ? 168 : 188)
     }
+
+    @ViewBuilder private func stripColumns(width: CGFloat?) -> some View {
+        MasterStrip(mixer: mixer, compact: compact, stripWidth: width)
+        ForEach(strips) { row in
+            ChannelStrip(row: row, mixer: mixer, compact: compact, highlighted: row.id == highlight, spotify: spotify, stripWidth: width)
+        }
+    }
+}
+
+private enum MixerLayout {
+    static let section: CGFloat = 16
+    static let minStrip: CGFloat = 72
+    static let maxStrip: CGFloat = 84
+    static let faderHeight: CGFloat = 136
+    static let nameHeight: CGFloat = 28
+    static let captionHeight: CGFloat = 14
+    static var stripHeight: CGFloat { faderHeight + 8 + nameHeight + 8 + captionHeight }
+    static let secondary = Color.white.opacity(0.55)
 }
 
 /// Horizontal blend between two apps. Equal-power, on top of each app's own fader.
@@ -143,61 +207,80 @@ private struct CrossfaderBar: View {
     @ObservedObject var mixer: AppVolumeMixer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Crossfader")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(MixerLayout.secondary)
+            HStack(spacing: 12) {
                 slotMenu(isA: true)
-                Spacer(minLength: 4)
-                Text("Crossfader")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                Spacer(minLength: 4)
+                track
                 slotMenu(isA: false)
             }
-            GeometryReader { g in
-                let travel = max(g.size.width - 22, 1)
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.1))
-                    Capsule()
-                        .fill(LinearGradient(colors: [.white.opacity(0.28), .white.opacity(0.08)], startPoint: .leading, endPoint: .trailing))
-                        .frame(width: 22 + travel * mixer.crossfade)
-                    Circle()
-                        .fill(.white)
-                        .frame(width: 18, height: 18)
-                        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                        .offset(x: travel * mixer.crossfade + 2)
-                }
-                .contentShape(Capsule())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                    mixer.setCrossfade(Double(min(1, max(0, (value.location.x - 11) / travel))))
-                })
-            }
-            .frame(height: 22)
-            Toggle("Stumme Apps zeigen", isOn: Binding(get: { mixer.showSilentApps }, set: { mixer.setShowSilent($0) }))
-                .font(.system(size: 11, weight: .medium))
-                .toggleStyle(.switch)
-                .controlSize(.mini)
         }
-        .padding(.horizontal, 4)
-        .padding(.top, 2)
+    }
+
+    private var track: some View {
+        GeometryReader { g in
+            let knob: CGFloat = 10
+            let travel = max(g.size.width - knob, 1)
+            let x = travel * mixer.crossfade
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.16)).frame(height: 6)
+                Capsule().fill(.white.opacity(0.92)).frame(width: max(6, x + knob / 2), height: 6)
+                Circle()
+                    .fill(.white)
+                    .frame(width: knob, height: knob)
+                    .shadow(color: .black.opacity(0.28), radius: 1, y: 1)
+                    .offset(x: x)
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                mixer.setCrossfade(Double(min(1, max(0, (value.location.x - knob / 2) / travel))))
+            })
+        }
+        .frame(height: 16)
+        .frame(maxWidth: .infinity)
     }
 
     private func slotMenu(isA: Bool) -> some View {
         let current = isA ? mixer.crossA : mixer.crossB
-        let name = mixer.rows.first { $0.id == current }?.name ?? (isA ? "A" : "B")
+        let row = mixer.rows.first { $0.id == current }
+        let name = row.map { MixerDisplayName.short(bundleID: $0.id, fallback: $0.name) } ?? (isA ? "A" : "B")
         return Menu {
-            ForEach(mixer.rows) { row in
-                Button(row.name) {
-                    if isA { mixer.setCrossA(row.id) } else { mixer.setCrossB(row.id) }
+            ForEach(mixer.rows) { item in
+                Button(MixerDisplayName.short(bundleID: item.id, fallback: item.name)) {
+                    if isA { mixer.setCrossA(item.id) } else { mixer.setCrossB(item.id) }
                 }
             }
         } label: {
-            Text(name)
-                .font(.system(size: 11, weight: .semibold))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: isA ? .leading : .trailing)
+            HStack(spacing: 6) {
+                if isA {
+                    endIcon(bundleID: current)
+                    Text("A").font(.system(size: 11, weight: .medium))
+                }
+                Text(name)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(MixerLayout.secondary)
+                    .lineLimit(1)
+                if !isA {
+                    Text("B").font(.system(size: 11, weight: .medium))
+                    endIcon(bundleID: current)
+                }
+            }
+            .frame(width: 96, alignment: isA ? .leading : .trailing)
         }
         .menuStyle(.borderlessButton)
-        .frame(width: 120)
+        .menuIndicator(.hidden)
+        .frame(width: 96)
+    }
+
+    @ViewBuilder private func endIcon(bundleID: String?) -> some View {
+        if let bundleID, let image = MixerIcons.icon(for: bundleID) {
+            Image(nsImage: image).resizable().frame(width: 14, height: 14)
+        } else {
+            Image(systemName: "app.fill").font(.system(size: 10)).frame(width: 14, height: 14)
+        }
     }
 }
 
@@ -207,10 +290,13 @@ struct MasterStrip: View {
     var compact: Bool
     /// Home hides the device menu so the pill stays easy to grab.
     var detailed: Bool = true
+    var stripWidth: CGFloat? = nil
+
+    private var column: CGFloat { stripWidth ?? (compact ? 48 : MixerLayout.maxStrip) }
 
     var body: some View {
-        VStack(spacing: 4) {
-            PillFader(level: mixer.master.level, maxLevel: 100, muted: mixer.master.muted, width: compact ? 48 : 56) {
+        VStack(spacing: 8) {
+            PillFader(level: mixer.master.level, maxLevel: 100, muted: mixer.master.muted, width: column) {
                 mixer.setMasterLevel($0)
             } onMute: {
                 mixer.toggleMasterMute()
@@ -218,34 +304,37 @@ struct MasterStrip: View {
                 mixer.setMasterLevel(100)
             } icon: {
                 Image(systemName: mixer.master.muted ? "speaker.slash.fill" : "speaker.wave.3.fill")
-                    .font(.system(size: compact ? 14 : 18, weight: .semibold))
+                    .font(.system(size: compact ? 14 : 16, weight: .semibold))
             }
+            .frame(height: compact ? 120 : MixerLayout.faderHeight)
+            Text("Mac")
+                .font(.system(size: 11, weight: .medium))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(width: column, height: compact ? 14 : MixerLayout.nameHeight, alignment: .top)
             if detailed {
-                Menu {
-                    ForEach(mixer.outputDevices()) { device in
-                        Button(device.name) { mixer.setSystemOutput(uid: device.uid) }
-                    }
-                } label: {
-                    HStack(spacing: 2) {
-                        Text(mixer.master.name)
-                            .font(.system(size: 10, weight: .semibold))
-                            .lineLimit(2)
-                        Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
-                    }
-                    .frame(width: compact ? 56 : 68, height: 26, alignment: .top)
-                }
-                .menuStyle(.borderlessButton)
-                .frame(width: compact ? 56 : 68)
-            } else {
-                Text("System")
-                    .font(.system(size: 10, weight: .semibold))
-                    .lineLimit(1)
-                    .frame(width: compact ? 56 : 68)
+                deviceMenu
             }
         }
-        .padding(3)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(0.08)))
-        .help("System volume. Double-click for 100%.")
+        .frame(width: column)
+        .help("System volume. Double-click for 100%. The caption picks the output.")
+    }
+
+    private var deviceMenu: some View {
+        Menu {
+            ForEach(mixer.outputDevices()) { device in
+                Button(device.name) { mixer.setSystemOutput(uid: device.uid) }
+            }
+        } label: {
+            Text(mixer.master.name)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(MixerLayout.secondary)
+                .lineLimit(1)
+                .frame(width: column, height: MixerLayout.captionHeight)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: column, height: MixerLayout.captionHeight)
     }
 }
 
@@ -257,20 +346,17 @@ struct ChannelStrip: View {
     var highlighted: Bool
     var detailed: Bool = true
     var spotify: SpotifyConnect? = nil
+    var stripWidth: CGFloat? = nil
     @State private var shimmer = false
 
     private var silenced: Bool { row.muted || (mixer.soloID != nil && mixer.soloID != row.id) }
-    @Environment(\.notchChrome) private var chrome
-    private var column: CGFloat {
-        switch chrome.faderStyle {
-        case .line: return compact ? 40 : 44
-        case .pill: return 52
-        case .tall: return 56
-        }
+    private var column: CGFloat { stripWidth ?? (compact ? 48 : MixerLayout.maxStrip) }
+    private var displayName: String {
+        mixer.soloID == row.id ? "Solo" : MixerDisplayName.short(bundleID: row.id, fallback: row.name)
     }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 8) {
             PillFader(level: silenced ? 0 : row.level, maxLevel: 150, muted: silenced, width: column) {
                 mixer.setLevel(row.id, $0)
             } onMute: {
@@ -282,24 +368,25 @@ struct ChannelStrip: View {
             } icon: {
                 icon
             }
-            Text(mixer.soloID == row.id ? "Solo" : row.name)
-                .font(.system(size: 10, weight: highlighted || mixer.soloID == row.id ? .semibold : .medium))
+            .frame(height: compact ? 120 : MixerLayout.faderHeight)
+            Text(displayName)
+                .font(.system(size: 11, weight: .medium))
                 .multilineTextAlignment(.center)
-                .lineLimit(1)
-                .frame(width: column)
+                .lineLimit(compact ? 1 : 2)
+                .frame(width: column, height: compact ? 14 : MixerLayout.nameHeight, alignment: .top)
             if detailed {
-                outputMenu.frame(width: column, height: 14)
+                outputMenu
             }
             if row.id == SpotifyConnect.spotifyBundle, let spotify, spotify.isEnabled {
                 SpotifyDeviceMenu(spotify: spotify)
-                    .frame(width: compact ? 64 : 76)
+                    .frame(width: column)
             }
         }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .stroke(.white.opacity(highlighted ? 0.55 : 0), lineWidth: 1.5))
+        .frame(width: column)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(.white.opacity(highlighted ? 0.08 : 0)))
         .opacity(row.playing ? 1 : 0.45)
-        .help("\(row.name). Double-click for 100%. Option-click to solo. The chevron picks an output.")
+        .help("\(row.name). Double-click for 100%. Option-click to solo. The caption picks an output.")
     }
 
     private var outputMenu: some View {
@@ -310,10 +397,14 @@ struct ChannelStrip: View {
             }
         } label: {
             Text(row.outputLabel ?? "Default")
-                .font(.system(size: 9))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(MixerLayout.secondary)
                 .lineLimit(1)
+                .frame(width: column, height: MixerLayout.captionHeight)
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: column, height: MixerLayout.captionHeight)
     }
 
     @ViewBuilder private var icon: some View {
@@ -373,7 +464,9 @@ private struct PillFader<Icon: View>: View {
                 }
                 VStack(spacing: 0) {
                     Text(muted ? "Off" : "\(level)")
-                        .font(chrome.font(11, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
                         .foregroundStyle(.white)
                     Spacer(minLength: 0)
                     Button(action: onMute) {
@@ -440,6 +533,49 @@ private struct ScrollWheelCatcher: NSViewRepresentable {
             onScroll?(delta)
         }
     }
+}
+
+enum MixerDisplayName {
+    static func short(bundleID: String, fallback: String) -> String {
+        if let known = known[bundleID] { return known }
+        var name = fallback
+        for prefix in ["Google ", "Mozilla ", "Apple "] where name.hasPrefix(prefix) {
+            name.removeFirst(prefix.count)
+        }
+        let helper = " Helper"
+        if name.hasSuffix(helper) { name.removeLast(helper.count) }
+        return name
+    }
+
+    private static let known: [String: String] = [
+        "com.google.Chrome": "Chrome",
+        "com.google.Chrome.beta": "Chrome",
+        "com.apple.Safari": "Safari",
+        "com.apple.SafariTechnologyPreview": "Safari",
+        "com.spotify.client": "Spotify",
+        "com.apple.Music": "Music",
+        "com.apple.finder": "Finder",
+        "com.microsoft.edgemac": "Edge",
+        "com.brave.Browser": "Brave",
+        "company.thebrowser.Browser": "Arc",
+        "com.apple.dt.Xcode": "Xcode",
+        "com.apple.Terminal": "Terminal",
+        "com.apple.FaceTime": "FaceTime",
+        "us.zoom.xos": "Zoom",
+        "com.microsoft.teams": "Teams",
+        "com.microsoft.teams2": "Teams",
+        "com.cisco.webexmeetingsapp": "Webex",
+        "com.apple.podcasts": "Podcasts",
+        "com.apple.TV": "TV",
+        "com.apple.QuickTimePlayerX": "QuickTime",
+        "com.apple.mail": "Mail",
+        "org.mozilla.firefox": "Firefox",
+        "com.tinyspeck.slackmacgap": "Slack",
+        "com.hnc.Discord": "Discord",
+        "com.openai.chat": "ChatGPT",
+        "com.anthropic.claudefordesktop": "Claude",
+        "com.todesktop.230313mzl4w4u92": "Cursor",
+    ]
 }
 
 @MainActor

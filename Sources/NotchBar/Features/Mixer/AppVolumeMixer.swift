@@ -26,6 +26,8 @@ struct MasterLevel: Equatable {
 @MainActor
 final class AppVolumeMixer: ObservableObject {
     @Published private(set) var rows: [AppVolumeRow] = []
+    /// Output devices for the strip menus. Refreshed with the row list, not on every redraw.
+    @Published private(set) var outputChoices: [AudioDeviceChoice] = []
     @Published private(set) var master = MasterLevel(name: "System", level: 100, muted: false)
     /// When on, Home shows now playing and the mixer strips in one panel. Off restores the old Home.
     @Published var combineOnHome: Bool {
@@ -242,6 +244,7 @@ final class AppVolumeMixer: ObservableObject {
         isVisible = mixerTab
         homeVisible = home
         if mixerTab || home {
+            refreshOutputChoices()
             publishRows()
             refreshMaster()
         }
@@ -575,6 +578,7 @@ final class AppVolumeMixer: ObservableObject {
 
     private func outputChanged() {
         refreshMaster()
+        refreshOutputChoices()
         rebind()
     }
 
@@ -615,7 +619,7 @@ final class AppVolumeMixer: ObservableObject {
 
     private func publishRows() {
         guard !isPreview else { return }
-        let devices = systemAudio.outputDevices()
+        let devices = outputChoices
         var next = activity.capableAudioApps().map { item -> AppVolumeRow in
             let level = saved[item.app.bundleID]
             let label = routes[item.app.bundleID].flatMap { uid in devices.first { $0.uid == uid }?.name }
@@ -676,7 +680,14 @@ final class AppVolumeMixer: ObservableObject {
         if recentPlaying.count > 6 { recentPlaying = Array(recentPlaying.prefix(6)) }
     }
 
-    func outputDevices() -> [AudioDeviceChoice] { systemAudio.outputDevices() }
+    func outputDevices() -> [AudioDeviceChoice] { outputChoices }
+
+    /// Reads the Core Audio device list once per output change, not on every redraw.
+    private func refreshOutputChoices() {
+        guard !isPreview else { return }
+        let devices = systemAudio.outputDevices()
+        if devices != outputChoices { outputChoices = devices }
+    }
 
     /// Routes one app through a device macOS is exposing, including AirPlay. Nil returns it to the default.
     func setAppOutput(_ bundleID: String, uid: String?) {
