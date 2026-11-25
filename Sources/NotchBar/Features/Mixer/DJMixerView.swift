@@ -16,7 +16,6 @@ struct DJMixerView: View {
             }
             TECrossfader(mixer: mixer, tint: TEColor.text)
             CurvePills(mixer: mixer)
-            TEMicroLabel(text: "DSP soon")
         }
     }
 
@@ -54,10 +53,10 @@ struct DJMixerView: View {
                 toneKnob("FILTER", tone.filter, tint) { set(isA, tone, filter: $0) }
                 toneKnob("GAIN", tone.gain, tint) { set(isA, tone, gain: $0) }
             }
-            .opacity(0.45)
-            .help("DSP soon. These knobs are stored and do not change the sound yet.")
             HStack(alignment: .center, spacing: 8) {
-                SegmentMeter(level: mixer.deckMeters[id ?? ""] ?? 0, tint: tint)
+                SegmentMeter(peak: id.flatMap { mixer.deckMeters[$0]?.peak } ?? 0,
+                             rms: id.flatMap { mixer.deckMeters[$0]?.rms } ?? 0,
+                             tint: tint, dim: row?.playing != true)
                 Spacer(minLength: 0)
                 TESquareButton(title: "CUE", active: id != nil && mixer.soloID == id, tint: tint, width: 36) {
                     guard let id else { return }

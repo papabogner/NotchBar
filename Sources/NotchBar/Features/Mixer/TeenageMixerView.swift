@@ -69,8 +69,13 @@ private struct TEChannel: View {
                 .lineLimit(2)
                 .frame(height: 28, alignment: .top)
             TEValue(text: row.muted ? "OFF" : "\(shown)")
-            TEFader(level: shown, maxLevel: 150, muted: row.muted) { mixer.setLevel(row.id, $0) }
-                .frame(height: 112)
+            HStack(spacing: 4) {
+                SegmentMeter(peak: mixer.deckMeters[row.id]?.peak ?? 0, rms: mixer.deckMeters[row.id]?.rms ?? 0,
+                             tint: TEColor.accent, dim: !row.playing)
+                    .frame(height: 112)
+                TEFader(level: shown, maxLevel: 150, muted: row.muted) { mixer.setLevel(row.id, $0) }
+                    .frame(height: 112)
+            }
             HStack(spacing: 8) {
                 TESquareButton(title: "M", active: row.muted) { mixer.toggleMute(row.id) }
                 TESquareButton(title: "S", active: mixer.soloID == row.id) { mixer.toggleSolo(row.id) }
@@ -101,7 +106,7 @@ private struct TEMaster: View {
     var body: some View {
         VStack(spacing: 8) {
             TEMicroLabel(text: "Mac")
-            FlatKnob(value: Double(mixer.master.level) / 100, tint: TEColor.accent, diameter: min(68, max(56, width))) { next in
+            FlatKnob(value: Double(mixer.master.level) / 100, tint: TEColor.accent, diameter: min(68, max(56, width)), meter: mixer.masterPeak) { next in
                 mixer.setMasterLevel(Int((next * 100).rounded()))
             }
             TEValue(text: mixer.master.muted ? "OFF" : "\(mixer.master.level)")

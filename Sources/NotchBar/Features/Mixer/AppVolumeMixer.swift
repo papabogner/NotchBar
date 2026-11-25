@@ -22,13 +22,25 @@ enum CrossCurve: String, CaseIterable, Identifiable {
 }
 
 /// DJ tone controls. Stored only until a render-thread filter exists.
-struct DeckTone: Equatable {
+struct DeckTone: Equatable, Sendable {
     var hi = 0.5
     var mid = 0.5
     var low = 0.5
     /// 0.5 is off. Left of center is a low pass, right is a high pass.
     var filter = 0.5
     var gain = 0.5
+
+    static let center = DeckTone()
+
+    var isFlat: Bool {
+        abs(hi - 0.5) < 0.02 && abs(mid - 0.5) < 0.02 && abs(low - 0.5) < 0.02
+            && abs(filter - 0.5) < 0.02 && abs(gain - 0.5) < 0.02
+    }
+}
+
+struct TapMeter: Equatable, Sendable {
+    var peak: Float = 0
+    var rms: Float = 0
 }
 
 /// One strip in the mixer. `playing` is false for an app that has a Core Audio process but is idle.
@@ -95,12 +107,11 @@ final class AppVolumeMixer: ObservableObject {
             if crossfadeEngaged { syncTaps() }
         }
     }
-    /// TODO: DSP. These do not reach the tap. A biquad has to run in the IOProc with
-    /// precomputed coefficients and no allocation before the knobs can change the sound.
-    @Published var toneA = DeckTone()
-    @Published var toneB = DeckTone()
-    /// Peak levels copied off the engine queue, at most 30 times a second, and only in DJ.
-    @Published private(set) var deckMeters: [String: Float] = [:]
+    /// Deck EQ. Coefficients are built off the render thread and published through a seqlock.
+    @Published var toneA = DeckTone() { didSet { guard !isPreview else { return }; pushTones() } }
+    @Published var toneB = DeckTone() { didSet { guard !isPreview else { return }; pushTones() } }
+    /// Peak and RMS copied off the engine queue, at most 30 times a second, while the mixer is open.
+    @Published private(set) var deckMeters: [String: TapMeter] = [:]
     /// Idle apps stay off the strip until this is on. They stay greyed out.
     @Published var showSilentApps = false {
         didSet {
@@ -155,7 +166,6 @@ final class AppVolumeMixer: ObservableObject {
     private static let levelsKey = "appVolumeLevels"
     private static let explainedKey = "appVolumeExplained"
     private static let homeKey = "homeMixerCombined"
-    private static let scenesKey = "mixerScenes"
     private static let routesKey = "appOutputRoutes"
     private static let duckKey = "mixerDucking"
     private static let duckMeetKey = "mixerDuckMeet"
@@ -164,12 +174,6 @@ final class AppVolumeMixer: ObservableObject {
     private static let callBundles: Set<String> = [
         "us.zoom.xos", "com.apple.FaceTime", "com.microsoft.teams", "com.microsoft.teams2", "com.cisco.webexmeetingsapp"
     ]
-
-    private struct SceneSnapshot: Codable {
-        var levels: [String: SavedLevel]
-        var masterLevel: Int
-        var masterMuted: Bool
-    }
 
     init(systemAudio: SystemAudio? = nil, activity: AudioActivityMonitor? = nil, preview: [AppVolumeRow]? = nil,
          previewMaster: MasterLevel? = nil) {
@@ -365,18 +369,34 @@ final class AppVolumeMixer: ObservableObject {
         }
     }
 
-    /// Copies tap peaks while DJ is on screen. Does nothing until a tap engine exists.
+    /// Copies tap peaks while the mixer tab is open. Does nothing until a tap engine exists.
     private func refreshMetering() {
         guard !isPreview else { return }
         guard #available(macOS 14.4, *) else { return }
-        let wanted = isVisible && face == .dj
-        (engineBox as? MixerEngine)?.setMetering(wanted)
-        if !wanted, !deckMeters.isEmpty { deckMeters = [:] }
+        (engineBox as? MixerEngine)?.setMetering(isVisible)
+        if !isVisible, !deckMeters.isEmpty { deckMeters = [:] }
     }
 
-    fileprivate func applyMeters(_ levels: [String: Float]) {
-        guard face == .dj, isVisible else { return }
+    fileprivate func applyMeters(_ levels: [String: TapMeter]) {
+        guard isVisible else { return }
         if levels != deckMeters { deckMeters = levels }
+    }
+
+    var masterPeak: Float { deckMeters.values.map(\.peak).max() ?? 0 }
+
+    private func toneMap() -> [String: DeckTone] {
+        var map: [String: DeckTone] = [:]
+        if let id = crossA { map[id] = toneA }
+        if let id = crossB { map[id] = toneB }
+        return map
+    }
+
+    private func pushTones() {
+        guard !isPreview else { return }
+        if #available(macOS 14.4, *) {
+            (engineBox as? MixerEngine)?.pushTones(toneMap())
+        }
+        syncTaps()
     }
 
     func setMasterLevel(_ level: Int) {
@@ -437,55 +457,6 @@ final class AppVolumeMixer: ObservableObject {
         syncTaps()
     }
 
-    func hasScene(_ name: String) -> Bool { loadScenes()[name] != nil }
-
-    private func loadScenes() -> [String: SceneSnapshot] {
-        guard let data = UserDefaults.standard.data(forKey: Self.scenesKey),
-              let decoded = try? JSONDecoder().decode([String: SceneSnapshot].self, from: data) else { return [:] }
-        return decoded
-    }
-
-    func saveScene(_ name: String) {
-        guard !isPreview else { return }
-        var all = loadScenes()
-        all[name] = SceneSnapshot(levels: saved, masterLevel: master.level, masterMuted: master.muted)
-        if let data = try? JSONEncoder().encode(all) {
-            UserDefaults.standard.set(data, forKey: Self.scenesKey)
-        }
-    }
-
-    /// Control-Option-S steps through the scenes that have been saved.
-    func cycleScene() {
-        let names = ["Focus", "Call"].filter { hasScene($0) }
-        guard !names.isEmpty else { return }
-        let name = names[sceneCursor % names.count]
-        sceneCursor += 1
-        recallScene(name)
-    }
-
-    private var sceneCursor = 0
-
-    func recallScene(_ name: String) {
-        guard !isPreview, let scene = loadScenes()[name] else { return }
-        guard #available(macOS 14.4, *) else { return }
-        let needsTap = scene.levels.contains { $0.value.muted || $0.value.level != 100 }
-        if needsTap && !explained {
-            needsExplanation = true
-            return
-        }
-        saved = scene.levels.filter { $0.value.level != 100 || $0.value.muted }
-        if needsTap { engaged = true }
-        persist()
-        let masterLevel = min(100, max(0, scene.masterLevel))
-        systemAudio.setVolume(Float(masterLevel) / 100)
-        if scene.masterMuted { systemAudio.setMuted(true) }
-        master.level = masterLevel
-        master.muted = scene.masterMuted
-        publishRows()
-        updateHooks()
-        syncTaps()
-    }
-
     func acceptExplanation() {
         guard !isPreview else { return }
         explained = true
@@ -536,6 +507,8 @@ final class AppVolumeMixer: ObservableObject {
         if !routes.isEmpty { return true }
         if !duckGain.isEmpty { return true }
         if crossGains.values.contains(where: { $0 < 0.999 }) { return true }
+        if let id = crossA, !toneA.isFlat { return true }
+        if let id = crossB, id != crossA, !toneB.isFlat { return true }
         let savedWants = saved.contains { $0.value.muted || $0.value.level != 100 }
         if autoApply && savedWants { return true }
         return engaged && savedWants
@@ -579,7 +552,8 @@ final class AppVolumeMixer: ObservableObject {
             routes: routes,
             duck: duckGain,
             cross: crossGains,
-            rebuild: rebuild
+            rebuild: rebuild,
+            tones: toneMap()
         )
         engine().submit(job)
         refreshMetering()
@@ -862,7 +836,7 @@ private final class MixerEngineHop: @unchecked Sendable {
         }
     }
 
-    func sendMeters(_ levels: [String: Float]) {
+    func sendMeters(_ levels: [String: TapMeter]) {
         let ref = ref
         DispatchQueue.main.async {
             MainActor.assumeIsolated { ref.mixer?.applyMeters(levels) }
@@ -887,6 +861,7 @@ private final class MixerEngine: @unchecked Sendable {
         var duck: [String: Float]
         var cross: [String: Float]
         var rebuild: Bool
+        var tones: [String: DeckTone]
     }
 
     struct Problem: Sendable {
@@ -964,9 +939,10 @@ private final class MixerEngine: @unchecked Sendable {
             guard let self else { return }
             self.meterScheduled = false
             guard self.metering else { return }
-            var levels: [String: Float] = [:]
+            var levels: [String: TapMeter] = [:]
             for (id, tap) in self.taps {
-                levels[id] = tap.meterSnapshot().peak
+                let snap = tap.meterSnapshot()
+                levels[id] = TapMeter(peak: snap.peak, rms: sqrt(max(0, snap.meanSquare)))
             }
             self.hop.sendMeters(levels)
             self.scheduleMeter()
@@ -992,12 +968,13 @@ private final class MixerEngine: @unchecked Sendable {
             suppressed.removeAll()
             stopAllOnQueue()
         }
+        defer { applyTones(job) }
         var outcome = Outcome()
         var playing: [String: PlayingProcessGroup] = [:]
         for group in job.groups { playing[group.app.bundleID] = group }
         for id in Array(taps.keys) {
             let keep = playing[id].map {
-                wantsTap(id: id, level: job.saved[id], solo: job.solo, route: job.routes[id], duck: job.duck[id], cross: job.cross[id])
+                wantsTap(id: id, level: job.saved[id], solo: job.solo, route: job.routes[id], duck: job.duck[id], cross: job.cross[id], filters: job.tones[id]?.isFlat == false)
                     && !suppressed.contains(id)
                     && taps[id]?.matches($0.processObjects, preferredUID: job.routes[id]) == true
             } ?? false
@@ -1006,7 +983,7 @@ private final class MixerEngine: @unchecked Sendable {
         guard !job.permissionDenied else { return outcome }
         for group in job.groups {
             let id = group.app.bundleID
-            guard wantsTap(id: id, level: job.saved[id], solo: job.solo, route: job.routes[id], duck: job.duck[id], cross: job.cross[id]),
+            guard wantsTap(id: id, level: job.saved[id], solo: job.solo, route: job.routes[id], duck: job.duck[id], cross: job.cross[id], filters: job.tones[id]?.isFlat == false),
                   !suppressed.contains(id) else { continue }
             let gain = gainValue(id: id, level: job.saved[id], solo: job.solo, duck: job.duck[id], cross: job.cross[id])
             if let existing = taps[id], existing.matches(group.processObjects, preferredUID: job.routes[id]) {
@@ -1036,6 +1013,22 @@ private final class MixerEngine: @unchecked Sendable {
         return outcome
     }
 
+    private func applyTones(_ job: Job) {
+        for (id, tap) in taps {
+            tap.setDeckTone(job.tones[id] ?? .center)
+        }
+    }
+
+    func pushTones(_ tones: [String: DeckTone]) {
+        let tones = tones
+        queue.async { [weak self] in
+            guard let self else { return }
+            for (id, tap) in self.taps {
+                tap.setDeckTone(tones[id] ?? .center)
+            }
+        }
+    }
+
     private func drop(_ id: String) {
         taps[id]?.stop()
         taps.removeValue(forKey: id)
@@ -1055,7 +1048,8 @@ private final class MixerEngine: @unchecked Sendable {
 
     /// A route, a duck, a real crossfade pull, solo, mute, or a level other than 100%.
     /// Gain 1.0 with none of those leaves the app on its own stream.
-    private func wantsTap(id: String, level: Level?, solo: String?, route: String?, duck: Float?, cross: Float?) -> Bool {
+    private func wantsTap(id: String, level: Level?, solo: String?, route: String?, duck: Float?, cross: Float?, filters: Bool) -> Bool {
+        if filters { return true }
         if route != nil { return true }
         if duck != nil { return true }
         if let cross, cross < 0.999 { return true }
@@ -1073,10 +1067,9 @@ private final class MixerEngine: @unchecked Sendable {
             own = min(1.5, max(0, duck))
         } else if let level {
             own = level.muted ? 0 : min(1.5, max(0, Float(level.level) / 100))
-        } else if let cross, cross < 0.999 {
-            own = 1
         } else {
-            own = 0
+            // No saved level means the app is still at its own 100%, including a tone-only tap.
+            own = 1
         }
         guard let cross, cross < 0.999 else { return own }
         return min(1.5, max(0, own * cross))

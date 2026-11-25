@@ -9,6 +9,7 @@ struct MixerPanel: View {
     var nowArtist: String?
     var nowBundle: String?
     var artwork: NSImage?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: MixerLayout.section) {
@@ -28,11 +29,16 @@ struct MixerPanel: View {
                         .foregroundStyle(MixerLayout.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if mixer.face == .dj {
-                    DJMixerView(mixer: mixer, nowTitle: nowTitle, nowArtist: nowArtist, nowBundle: nowBundle, artwork: artwork)
-                } else {
-                    TeenageMixerView(mixer: mixer, highlight: highlight, spotify: spotify)
+                Group {
+                    if mixer.face == .dj {
+                        DJMixerView(mixer: mixer, nowTitle: nowTitle, nowArtist: nowArtist, nowBundle: nowBundle, artwork: artwork)
+                            .transition(.opacity.combined(with: .move(edge: .trailing)))
+                    } else {
+                        TeenageMixerView(mixer: mixer, highlight: highlight, spotify: spotify)
+                            .transition(.opacity.combined(with: .move(edge: .leading)))
+                    }
                 }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: mixer.face)
             }
             if let status = mixer.statusMessage {
                 Text(status).font(.system(size: 10)).foregroundStyle(MixerLayout.secondary)
@@ -196,88 +202,6 @@ enum MixerLayout {
     static let captionHeight: CGFloat = 14
     static var stripHeight: CGFloat { faderHeight + 8 + nameHeight + 8 + captionHeight }
     static let secondary = Color.white.opacity(0.55)
-}
-
-/// Horizontal blend between two apps. Equal-power, on top of each app's own fader.
-private struct CrossfaderBar: View {
-    @ObservedObject var mixer: AppVolumeMixer
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Crossfader")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(MixerLayout.secondary)
-            HStack(spacing: 12) {
-                slotMenu(isA: true)
-                track
-                slotMenu(isA: false)
-            }
-        }
-    }
-
-    private var track: some View {
-        GeometryReader { g in
-            let knob: CGFloat = 10
-            let travel = max(g.size.width - knob, 1)
-            let x = travel * mixer.crossfade
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.16)).frame(height: 6)
-                Capsule().fill(.white.opacity(0.92)).frame(width: max(6, x + knob / 2), height: 6)
-                Circle()
-                    .fill(.white)
-                    .frame(width: knob, height: knob)
-                    .shadow(color: .black.opacity(0.28), radius: 1, y: 1)
-                    .offset(x: x)
-            }
-            .frame(maxHeight: .infinity, alignment: .center)
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                mixer.setCrossfade(Double(min(1, max(0, (value.location.x - knob / 2) / travel))))
-            })
-        }
-        .frame(height: 16)
-        .frame(maxWidth: .infinity)
-    }
-
-    private func slotMenu(isA: Bool) -> some View {
-        let current = isA ? mixer.crossA : mixer.crossB
-        let row = mixer.rows.first { $0.id == current }
-        let name = row.map { MixerDisplayName.short(bundleID: $0.id, fallback: $0.name) } ?? (isA ? "A" : "B")
-        return Menu {
-            ForEach(mixer.rows) { item in
-                Button(MixerDisplayName.short(bundleID: item.id, fallback: item.name)) {
-                    if isA { mixer.setCrossA(item.id) } else { mixer.setCrossB(item.id) }
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                if isA {
-                    endIcon(bundleID: current)
-                    Text("A").font(.system(size: 11, weight: .medium))
-                }
-                Text(name)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(MixerLayout.secondary)
-                    .lineLimit(1)
-                if !isA {
-                    Text("B").font(.system(size: 11, weight: .medium))
-                    endIcon(bundleID: current)
-                }
-            }
-            .frame(width: 96, alignment: isA ? .leading : .trailing)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: 96)
-    }
-
-    @ViewBuilder private func endIcon(bundleID: String?) -> some View {
-        if let bundleID, let image = MixerIcons.icon(for: bundleID) {
-            Image(nsImage: image).resizable().frame(width: 14, height: 14)
-        } else {
-            Image(systemName: "app.fill").font(.system(size: 10)).frame(width: 14, height: 14)
-        }
-    }
 }
 
 /// The system output. Visually heavier than an app strip, and it never installs a process tap.

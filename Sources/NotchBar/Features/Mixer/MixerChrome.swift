@@ -41,6 +41,8 @@ struct FlatKnob: View {
     var enabled: Bool = true
     /// Black disc with a light ring. Used for the LOW band.
     var filled: Bool = false
+    /// Extra arc for the master peak. 0 hides it.
+    var meter: Float = 0
     var onChange: (Double) -> Void
     @State private var origin: Double?
 
@@ -53,6 +55,13 @@ struct FlatKnob: View {
                 .trim(from: 0, to: clamped)
                 .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+            if meter > 0.01 {
+                Circle()
+                    .trim(from: 0, to: CGFloat(min(1, meter)))
+                    .stroke(tint.opacity(0.45), style: StrokeStyle(lineWidth: 1, lineCap: .round))
+                    .padding(3)
+                    .rotationEffect(.degrees(-90))
+            }
             Circle()
                 .fill(TEColor.text)
                 .frame(width: 4, height: 4)
@@ -86,6 +95,8 @@ struct TEFader: View {
     var muted: Bool
     var tint: Color = TEColor.accent
     var onChange: (Int) -> Void
+    @State private var dragging = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geo in
@@ -100,12 +111,17 @@ struct TEFader: View {
                     .frame(width: 28, height: 12)
                     .overlay(Rectangle().fill(tint).frame(width: 16, height: 1))
                     .offset(y: y)
+                    .animation(dragging || reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.82), value: level)
+                    .animation(dragging || reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.82), value: muted)
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 2).onChanged { drag in
+                dragging = true
                 let next = 1 - Double(min(travel, max(0, drag.location.y - 6)) / travel)
                 onChange(min(maxLevel, max(0, Int((next * Double(maxLevel)).rounded()))))
+            }.onEnded { _ in
+                dragging = false
             })
             .background(ScrollWheelCatcher { delta in
                 let step = delta > 0 ? 2 : -2
@@ -138,6 +154,8 @@ struct TESquareButton: View {
     var tint: Color = TEColor.accent
     var width: CGFloat = 20
     var action: () -> Void
+    @State private var hover = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -146,8 +164,12 @@ struct TESquareButton: View {
                 .foregroundStyle(active ? Color.black : TEColor.text)
                 .frame(width: width, height: 20)
                 .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(active ? tint : TEColor.panel))
+                .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(Color.white.opacity(hover ? 0.28 : 0.08), lineWidth: 1))
+                .brightness(hover && !active ? 0.12 : 0)
         }
         .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.72), value: active)
     }
 }
 
@@ -177,6 +199,8 @@ struct CurvePills: View {
 struct TECrossfader: View {
     @ObservedObject var mixer: AppVolumeMixer
     var tint: Color = TEColor.accent
+    @State private var dragging = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 12) {
@@ -198,12 +222,16 @@ struct TECrossfader: View {
                     .frame(width: cap, height: 10)
                     .overlay(Rectangle().fill(tint).frame(width: 10, height: 1))
                     .offset(x: x)
+                    .animation(dragging || reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.8), value: mixer.crossfade)
             }
             .frame(maxHeight: .infinity, alignment: .center)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                dragging = true
                 let next = Double(min(travel, max(0, drag.location.x - cap / 2)) / travel)
                 mixer.setCrossfade(next)
+            }.onEnded { _ in
+                dragging = false
             })
         }
         .frame(height: 16)
@@ -242,21 +270,51 @@ struct TECrossfader: View {
     }
 }
 
-/// Segmented level. Lit from the latest tap peak. Empty when that app has no tap.
+/// Thin LED column. The view exists only while the mixer panel is on screen.
 struct SegmentMeter: View {
-    var level: Float
+    var peak: Float
+    var rms: Float
     var tint: Color
+    var dim: Bool = false
+    @State private var hold = MeterHold()
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0 / 30)) { _ in
-            HStack(spacing: 2) {
-                ForEach(0..<12, id: \.self) { index in
-                    let gate = Float(index) / 12
+        TimelineView(.periodic(from: .now, by: 1.0 / 30)) { timeline in
+            let held = hold.note(peak, now: timeline.date)
+            VStack(spacing: 2) {
+                ForEach((0..<12).reversed(), id: \.self) { index in
+                    let gate = Float(index + 1) / 12
                     RoundedRectangle(cornerRadius: 1)
-                        .fill(level > gate ? tint : TEColor.track)
-                        .frame(width: 4, height: 14)
+                        .fill(segmentColor(gate: gate, held: held))
+                        .frame(height: 4)
                 }
             }
+            .opacity(dim ? 0.35 : 1)
         }
+        .frame(width: 6)
+    }
+
+    private func segmentColor(gate: Float, held: Float) -> Color {
+        if peak >= gate { return tint }
+        if rms >= gate { return tint.opacity(0.45) }
+        if held >= gate { return TEColor.text.opacity(0.35) }
+        return TEColor.track
+    }
+}
+
+private final class MeterHold {
+    private var value: Float = 0
+    private var at = Date.distantPast
+
+    func note(_ peak: Float, now: Date) -> Float {
+        if peak >= value - 0.01 {
+            value = peak
+            at = now
+            return value
+        }
+        let age = now.timeIntervalSince(at)
+        if age < 1 { return value }
+        let fall = Float(min(1, (age - 1) / 1))
+        return max(peak, value * (1 - fall))
     }
 }

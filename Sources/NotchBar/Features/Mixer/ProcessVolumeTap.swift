@@ -65,9 +65,13 @@ final class ProcessVolumeTap: @unchecked Sendable {
     private var tap: AudioObjectID = 0
     private var proc: AudioDeviceIOProcID?
     private var stopped = false
+    private var toneBox: UnsafeMutablePointer<ToneMailbox>?
+    private var toneState: UnsafeMutablePointer<ToneRuntime>?
+    let sampleRate: Float
 
     private init(processObjects: [AudioObjectID], preferredUID: String?, label: String, context: UnsafeMutablePointer<TapContext>,
-                 aggregate: AudioObjectID, tap: AudioObjectID, proc: AudioDeviceIOProcID?) {
+                 aggregate: AudioObjectID, tap: AudioObjectID, proc: AudioDeviceIOProcID?,
+                 toneBox: UnsafeMutablePointer<ToneMailbox>, toneState: UnsafeMutablePointer<ToneRuntime>, sampleRate: Float) {
         self.processObjects = processObjects
         self.preferredUID = preferredUID
         self.label = label
@@ -75,6 +79,15 @@ final class ProcessVolumeTap: @unchecked Sendable {
         self.aggregate = aggregate
         self.tap = tap
         self.proc = proc
+        self.toneBox = toneBox
+        self.toneState = toneState
+        self.sampleRate = sampleRate
+    }
+
+    /// Engine queue only. Writes the inactive coefficient slot, then publishes it.
+    func setDeckTone(_ tone: DeckTone) {
+        guard let toneBox else { return }
+        tonePublish(ToneMath.target(for: tone, sampleRate: sampleRate), toneBox)
     }
 
     deinit { stop() }
@@ -130,6 +143,12 @@ final class ProcessVolumeTap: @unchecked Sendable {
         context?.deinitialize(count: 1)
         context?.deallocate()
         context = nil
+        toneBox?.deinitialize(count: 1)
+        toneBox?.deallocate()
+        toneBox = nil
+        toneState?.deinitialize(count: 1)
+        toneState?.deallocate()
+        toneState = nil
         proc = nil
         aggregate = 0
         tap = 0
@@ -225,11 +244,27 @@ final class ProcessVolumeTap: @unchecked Sendable {
         let totalInput = max(inputChannelCount(aggregate), Int(inputFormat.mChannelsPerFrame))
         let tapOffset = totalInput > tapChannels ? totalInput - tapChannels : 0
 
+        let rate = inputFormat.mSampleRate > 1000 ? Float(inputFormat.mSampleRate) : 48_000
+        let box = UnsafeMutablePointer<ToneMailbox>.allocate(capacity: 1)
+        box.initialize(to: ToneMailbox())
+        let state = UnsafeMutablePointer<ToneRuntime>.allocate(capacity: 1)
+        var runtime = ToneRuntime()
+        runtime.alpha = 1 - exp(-1 / (rate * 0.02))
+        state.initialize(to: runtime)
+        var keepTone = false
+        defer {
+            if !keepTone {
+                box.deinitialize(count: 1)
+                box.deallocate()
+                state.deinitialize(count: 1)
+                state.deallocate()
+            }
+        }
         let context = UnsafeMutablePointer<TapContext>.allocate(capacity: 1)
         let clamped = min(1.5, max(0, gain))
-        var rate = inputFormat.mSampleRate
-        if !(rate > 0) { rate = 48_000 }
-        var step = Float(1.0 / (rate * 0.010))
+        var stepRate = inputFormat.mSampleRate
+        if !(stepRate > 0) { stepRate = 48_000 }
+        var step = Float(1.0 / (stepRate * 0.010))
         if !(step > 0) { step = 1 }
         context.initialize(to: TapContext(
             targetBits: Int32(bitPattern: clamped.bitPattern),
@@ -244,7 +279,9 @@ final class ProcessVolumeTap: @unchecked Sendable {
             tapChannelOffset: Int32(tapOffset),
             tapChannelCount: Int32(tapChannels),
             peakBits: 0,
-            rmsBits: 0))
+            rmsBits: 0,
+            toneBoxBits: UInt64(UInt(bitPattern: box)),
+            toneStateBits: UInt64(UInt(bitPattern: state))))
         resources.context = context
 
         var proc: AudioDeviceIOProcID?
@@ -265,7 +302,8 @@ final class ProcessVolumeTap: @unchecked Sendable {
             return .failure(error)
         }
 
-        let tap = ProcessVolumeTap(processObjects: objects, preferredUID: outputUID, label: label, context: context, aggregate: aggregate, tap: tapID, proc: proc)
+        keepTone = true
+        let tap = ProcessVolumeTap(processObjects: objects, preferredUID: outputUID, label: label, context: context, aggregate: aggregate, tap: tapID, proc: proc, toneBox: box, toneState: state, sampleRate: rate)
         resources.abandon()
         mixerLog.info("tap started \(label, privacy: .public) gain=\(clamped, privacy: .public) output=\(output.uid, privacy: .public) objects=\(objects.map(String.init).joined(separator: ","), privacy: .public) inputChannels=\(totalInput, privacy: .public) tapOffset=\(tapOffset, privacy: .public) suppressedInput=\(suppressedInput, privacy: .public) drift=\(drift, privacy: .public)")
         return .success(tap)
@@ -292,6 +330,9 @@ private struct TapContext {
     /// Peak and mean square of the last buffer. Written only through OSAtomic.
     var peakBits: Int32
     var rmsBits: Int32
+    /// Fixed after the tap starts. The render callback only reads them.
+    var toneBoxBits: UInt64
+    var toneStateBits: UInt64
 }
 
 private let targetOffset = MemoryLayout<TapContext>.offset(of: \TapContext.targetBits) ?? 0
@@ -307,6 +348,8 @@ private let tapChannelOffsetOffset = MemoryLayout<TapContext>.offset(of: \TapCon
 private let tapChannelCountOffset = MemoryLayout<TapContext>.offset(of: \TapContext.tapChannelCount) ?? 40
 private let peakOffset = MemoryLayout<TapContext>.offset(of: \TapContext.peakBits) ?? 44
 private let rmsOffset = MemoryLayout<TapContext>.offset(of: \TapContext.rmsBits) ?? 48
+private let toneBoxOffset = MemoryLayout<TapContext>.offset(of: \TapContext.toneBoxBits) ?? 56
+private let toneStateOffset = MemoryLayout<TapContext>.offset(of: \TapContext.toneStateBits) ?? 64
 
 /// Owns half-built Core Audio objects so a failed start cannot leave a tap muting an app.
 @available(macOS 14.4, *)
@@ -400,6 +443,8 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
     var frame = 0
     var peak: Float = 0
     var sum: Float = 0
+    let tone = toneWork(context)
+    var toneCursor = tone
     while frame < frames {
         if gain < target {
             gain += step
@@ -408,6 +453,7 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
             gain -= step
             if gain < target { gain = target }
         }
+        if toneCursor.live { toneStep(&toneCursor) }
         var channel = 0
         while channel < outChannels {
             let sample: Float
@@ -418,7 +464,11 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
                     _ = OSAtomicCompareAndSwap32Barrier(0, 1, int32Field(context, faultOffset))
                     return false
                 }
-                var shaped = read * gain
+                var readTone = read
+                if toneCursor.live, channel < 2 {
+                    readTone = toneSample(read, channel: channel, work: &toneCursor)
+                }
+                var shaped = readTone * gain
                 // Above 100% the extra gain is limited so peaks don't turn into hard crackle.
                 if gain > 1 { shaped = tanhf(shaped) }
                 sample = shaped
@@ -438,12 +488,36 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
         frame += 1
     }
     gainSlot.pointee = gain
+    if toneCursor.live, let state = toneState(context) { toneEnd(toneCursor, state) }
     // Strided aggregate buffers are not one contiguous channel, so this stays in the loop
     // instead of calling vDSP. No allocation, and the words are stored atomically.
     let counted = Float(max(frames * min(outChannels, tapChannels), 1))
     storeAtomicFloat(peak, context, peakOffset)
     storeAtomicFloat(sum / counted, context, rmsOffset)
     return true
+}
+
+private func uint64Field(_ context: UnsafeMutablePointer<TapContext>, _ offset: Int) -> UnsafeMutablePointer<UInt64> {
+    UnsafeMutableRawPointer(context).advanced(by: offset).assumingMemoryBound(to: UInt64.self)
+}
+
+private func tonePointer<T>(_ bits: UInt64) -> UnsafeMutablePointer<T>? {
+    guard bits != 0 else { return nil }
+    return UnsafeMutablePointer(bitPattern: UInt(bits))
+}
+
+private func toneWork(_ context: UnsafeMutablePointer<TapContext>) -> ToneWork {
+    let boxBits = uint64Field(context, toneBoxOffset).pointee
+    let stateBits = uint64Field(context, toneStateOffset).pointee
+    guard let box: UnsafeMutablePointer<ToneMailbox> = tonePointer(boxBits),
+          let state: UnsafeMutablePointer<ToneRuntime> = tonePointer(stateBits) else {
+        return ToneWork()
+    }
+    return toneBegin(state, box)
+}
+
+private func toneState(_ context: UnsafeMutablePointer<TapContext>) -> UnsafeMutablePointer<ToneRuntime>? {
+    tonePointer(uint64Field(context, toneStateOffset).pointee)
 }
 
 private func storeAtomicFloat(_ value: Float, _ context: UnsafeMutablePointer<TapContext>, _ offset: Int) {
