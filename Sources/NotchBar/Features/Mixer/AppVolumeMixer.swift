@@ -1,5 +1,36 @@
 import AppKit
 
+/// Which mixer face is showing. Stored, and switched from the mixer header.
+enum MixerFace: String, CaseIterable, Identifiable {
+    case mixer
+    case dj
+    var id: String { rawValue }
+    var title: String { self == .mixer ? "MIXER" : "DJ" }
+}
+
+/// Crossfader law. Applied only after the fader moves or a side is picked.
+enum CrossCurve: String, CaseIterable, Identifiable {
+    case smooth, dip, cut
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .smooth: return "SMOOTH"
+        case .dip: return "DIP"
+        case .cut: return "CUT"
+        }
+    }
+}
+
+/// DJ tone controls. Stored only until a render-thread filter exists.
+struct DeckTone: Equatable {
+    var hi = 0.5
+    var mid = 0.5
+    var low = 0.5
+    /// 0.5 is off. Left of center is a low pass, right is a high pass.
+    var filter = 0.5
+    var gain = 0.5
+}
+
 /// One strip in the mixer. `playing` is false for an app that has a Core Audio process but is idle.
 struct AppVolumeRow: Identifiable, Equatable {
     var id: String
@@ -49,6 +80,27 @@ final class AppVolumeMixer: ObservableObject {
     @Published private(set) var duckAppID: String?
     /// Applies the saved level, mute, and output when that app plays, without waiting for a slider.
     @Published private(set) var autoApply = false
+    /// MIXER or DJ. The header control writes this.
+    @Published var face: MixerFace = .mixer {
+        didSet {
+            guard !isPreview else { return }
+            UserDefaults.standard.set(face.rawValue, forKey: "mixerFace")
+            refreshMetering()
+        }
+    }
+    @Published var crossCurve: CrossCurve = .smooth {
+        didSet {
+            guard !isPreview else { return }
+            UserDefaults.standard.set(crossCurve.rawValue, forKey: "mixerCrossCurve")
+            if crossfadeEngaged { syncTaps() }
+        }
+    }
+    /// TODO: DSP. These do not reach the tap. A biquad has to run in the IOProc with
+    /// precomputed coefficients and no allocation before the knobs can change the sound.
+    @Published var toneA = DeckTone()
+    @Published var toneB = DeckTone()
+    /// Peak levels copied off the engine queue, at most 30 times a second, and only in DJ.
+    @Published private(set) var deckMeters: [String: Float] = [:]
     /// Idle apps stay off the strip until this is on. They stay greyed out.
     @Published var showSilentApps = false {
         didSet {
@@ -146,6 +198,8 @@ final class AppVolumeMixer: ObservableObject {
         duckAppID = UserDefaults.standard.string(forKey: Self.duckAppKey)
         autoApply = UserDefaults.standard.bool(forKey: Self.autoApplyKey)
         showSilentApps = UserDefaults.standard.bool(forKey: "showSilentApps")
+        face = MixerFace(rawValue: UserDefaults.standard.string(forKey: "mixerFace") ?? "") ?? .mixer
+        crossCurve = CrossCurve(rawValue: UserDefaults.standard.string(forKey: "mixerCrossCurve") ?? "") ?? .smooth
     }
 
     func setDucking(_ on: Bool) {
@@ -249,6 +303,7 @@ final class AppVolumeMixer: ObservableObject {
             refreshMaster()
         }
         updateHooks()
+        refreshMetering()
     }
 
     func setShowSilent(_ on: Bool) {
@@ -293,11 +348,35 @@ final class AppVolumeMixer: ObservableObject {
         if crossB == nil, let id = loud.first(where: { $0.id != crossA })?.id { crossB = id }
     }
 
-    /// Equal-power multipliers. Empty until the crossfader is moved or a side is picked.
+    /// Curve multipliers. Empty until the crossfader is moved or a side is picked.
     private var crossGains: [String: Float] {
         guard crossfadeEngaged, let a = crossA, let b = crossB, a != b else { return [:] }
         let t = Float(min(1, max(0, crossfade)))
-        return [a: cos(t * .pi / 2), b: sin(t * .pi / 2)]
+        switch crossCurve {
+        case .smooth:
+            return [a: cos(t * .pi / 2), b: sin(t * .pi / 2)]
+        case .dip:
+            return [a: 1 - t, b: t]
+        case .cut:
+            if t < 0.48 { return [a: 1, b: 0] }
+            if t > 0.52 { return [a: 0, b: 1] }
+            let blend = (t - 0.48) / 0.04
+            return [a: 1 - blend, b: blend]
+        }
+    }
+
+    /// Copies tap peaks while DJ is on screen. Does nothing until a tap engine exists.
+    private func refreshMetering() {
+        guard !isPreview else { return }
+        guard #available(macOS 14.4, *) else { return }
+        let wanted = isVisible && face == .dj
+        (engineBox as? MixerEngine)?.setMetering(wanted)
+        if !wanted, !deckMeters.isEmpty { deckMeters = [:] }
+    }
+
+    fileprivate func applyMeters(_ levels: [String: Float]) {
+        guard face == .dj, isVisible else { return }
+        if levels != deckMeters { deckMeters = levels }
     }
 
     func setMasterLevel(_ level: Int) {
@@ -488,6 +567,7 @@ final class AppVolumeMixer: ObservableObject {
         rebuildNext = false
         guard needsActiveTaps else {
             (engineBox as? MixerEngine)?.stopAll()
+            refreshMetering()
             return
         }
         syncInFlight = true
@@ -502,6 +582,7 @@ final class AppVolumeMixer: ObservableObject {
             rebuild: rebuild
         )
         engine().submit(job)
+        refreshMetering()
     }
 
     /// A missing output or a failed tap, delivered on the main actor after the engine queue finishes.
@@ -780,6 +861,13 @@ private final class MixerEngineHop: @unchecked Sendable {
             MainActor.assumeIsolated { ref.mixer?.applyEngine(outcome) }
         }
     }
+
+    func sendMeters(_ levels: [String: Float]) {
+        let ref = ref
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { ref.mixer?.applyMeters(levels) }
+        }
+    }
 }
 
 /// Owns process taps. Every Core Audio create, start, stop, and destroy runs on `queue`, never on the main thread.
@@ -820,6 +908,8 @@ private final class MixerEngine: @unchecked Sendable {
     private var taps: [String: ProcessVolumeTap] = [:]
     private var suppressed: Set<String> = []
     private var healthScheduled = false
+    private var metering = false
+    private var meterScheduled = false
     private let countLock = NSLock()
     private var liveTaps = 0
 
@@ -855,6 +945,31 @@ private final class MixerEngine: @unchecked Sendable {
         let id = id
         queue.async { [weak self] in
             self?.suppressed.remove(id)
+        }
+    }
+
+    /// Reads atomic peaks from existing taps. No Core Audio calls. Stops when DJ is hidden.
+    func setMetering(_ on: Bool) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.metering = on
+            if on { self.scheduleMeter() }
+        }
+    }
+
+    private func scheduleMeter() {
+        guard metering, !meterScheduled else { return }
+        meterScheduled = true
+        queue.asyncAfter(deadline: .now() + 1.0 / 30) { [weak self] in
+            guard let self else { return }
+            self.meterScheduled = false
+            guard self.metering else { return }
+            var levels: [String: Float] = [:]
+            for (id, tap) in self.taps {
+                levels[id] = tap.meterSnapshot().peak
+            }
+            self.hop.sendMeters(levels)
+            self.scheduleMeter()
         }
     }
 

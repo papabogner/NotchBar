@@ -5,6 +5,10 @@ struct MixerPanel: View {
     @ObservedObject var mixer: AppVolumeMixer
     var highlight: String?
     var spotify: SpotifyConnect? = nil
+    var nowTitle: String?
+    var nowArtist: String?
+    var nowBundle: String?
+    var artwork: NSImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: MixerLayout.section) {
@@ -18,33 +22,44 @@ struct MixerPanel: View {
                     Text("Keine Apps mit Audio")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(MixerLayout.secondary)
-                } else if visibleStrips.isEmpty {
+                } else if mixer.face == .mixer && visibleStrips.isEmpty {
                     Text("Gerade spielt nichts. Stumme Apps einblenden, um sie trotzdem zu sehen.")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(MixerLayout.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                MixerStripRow(mixer: mixer, highlight: highlight, compact: false, spotify: spotify, rows: visibleStrips)
-                CrossfaderBar(mixer: mixer)
+                if mixer.face == .dj {
+                    DJMixerView(mixer: mixer, nowTitle: nowTitle, nowArtist: nowArtist, nowBundle: nowBundle, artwork: artwork)
+                } else {
+                    TeenageMixerView(mixer: mixer, highlight: highlight, spotify: spotify)
+                }
             }
             if let status = mixer.statusMessage {
                 Text(status).font(.system(size: 10)).foregroundStyle(MixerLayout.secondary)
                     .lineLimit(3).fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(MixerLayout.section)
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(TEColor.background)
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.06), lineWidth: 1))
     }
 
     private var header: some View {
         HStack(spacing: MixerLayout.section) {
-            Text("Mixer")
+            Text(mixer.face == .dj ? "DJ" : "Mixer")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(TEColor.text)
             Spacer(minLength: MixerLayout.section)
-            HStack(spacing: 8) {
-                silentToggle
-                sceneMenu
+            Picker("Style", selection: $mixer.face) {
+                ForEach(MixerFace.allCases) { face in
+                    Text(face.title).tag(face)
+                }
             }
+            .pickerStyle(.segmented)
+            .frame(width: 148)
+            .labelsHidden()
+            silentToggle
         }
     }
 
@@ -99,25 +114,6 @@ struct MixerPanel: View {
                 .background(Capsule().fill(.white))
         }
         .buttonStyle(PressableStyle(scale: 0.95))
-    }
-
-    private var sceneMenu: some View {
-        Menu {
-            sceneItems("Focus")
-            sceneItems("Call")
-        } label: {
-            Text("Scenes").font(.system(size: 11, weight: .semibold))
-                .padding(.horizontal, 10).frame(height: 22)
-                .background(Capsule().fill(.white.opacity(0.1)))
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-    }
-
-    @ViewBuilder private func sceneItems(_ name: String) -> some View {
-        Button("Save \(name)") { mixer.saveScene(name) }
-        Button("Recall \(name)") { mixer.recallScene(name) }
-            .disabled(!mixer.hasScene(name))
     }
 
     private func quietButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -512,7 +508,7 @@ private struct PillFader<Icon: View>: View {
 }
 
 /// Trackpad and mouse-wheel changes, delivered on the main thread by AppKit.
-private struct ScrollWheelCatcher: NSViewRepresentable {
+struct ScrollWheelCatcher: NSViewRepresentable {
     var onScroll: (CGFloat) -> Void
 
     func makeNSView(context: Context) -> WheelView {
@@ -579,7 +575,7 @@ enum MixerDisplayName {
 }
 
 @MainActor
-private enum MixerIcons {
+enum MixerIcons {
     private static var cache: [String: NSImage] = [:]
 
     static func icon(for bundleID: String) -> NSImage? {

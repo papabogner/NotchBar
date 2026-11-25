@@ -52,7 +52,6 @@ final class HotkeyController: ObservableObject {
         let mods = UInt32(controlKey | optionKey)
         addKey(UInt32(kVK_ANSI_N), mods, 1)
         addKey(UInt32(kVK_ANSI_M), mods, 2)
-        addKey(UInt32(kVK_ANSI_S), mods, 3)
     }
 
     private func addKey(_ code: UInt32, _ mods: UInt32, _ id: UInt32) {

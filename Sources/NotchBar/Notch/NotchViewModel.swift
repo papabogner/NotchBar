@@ -175,7 +175,7 @@ final class NotchViewModel: ObservableObject {
             if self.isExpanded { self.close() } else { self.open(self.preferredTab) }
         }
         hotkeys.onMute = { [weak self] in self?.volumes.toggleMasterMute() }
-        hotkeys.onScene = { [weak self] in self?.volumes.cycleScene() }
+        hotkeys.onScene = nil
         hotkeys.installIfNeeded()
         awake.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         shelf.bind()
@@ -315,7 +315,7 @@ final class NotchViewModel: ObservableObject {
         case _ where showsCamera: content = 262
         case .home: content = 252
         case .calendar, .activity: content = 222
-        case .mixer: content = 360
+        case .mixer: content = volumes.face == .dj ? 500 : 430
         default: content = 150
         }
         // A toast gets its own strip below the content instead of covering it.

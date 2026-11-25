@@ -68,7 +68,9 @@ struct ExpandedNotch: View {
         case .clipboard: ClipboardPanel(store: vm.clipboard) { vm.copyClip($0, paste: $1) }
         case .calendar: CalendarPanel(calendar: vm.calendar)
         case .activity: ActivityPanel(monitor: vm.activity)
-        case .mixer: MixerPanel(mixer: vm.volumes, highlight: media.nowPlaying?.source.bundleID, spotify: vm.spotify)
+        case .mixer: MixerPanel(mixer: vm.volumes, highlight: media.nowPlaying?.source.bundleID, spotify: vm.spotify,
+                                nowTitle: media.nowPlaying?.title, nowArtist: media.nowPlaying?.artist,
+                                nowBundle: media.nowPlaying?.source.bundleID, artwork: media.artwork)
         }
     }
 

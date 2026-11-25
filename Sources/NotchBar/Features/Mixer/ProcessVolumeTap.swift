@@ -109,6 +109,14 @@ final class ProcessVolumeTap: @unchecked Sendable {
         return OSAtomicAdd32Barrier(0, int32Field(context, faultOffset)) != 0
     }
 
+    /// Latest buffer peak and mean square, written by the render callback with atomics.
+    func meterSnapshot() -> (peak: Float, meanSquare: Float) {
+        guard let context else { return (0, 0) }
+        let peak = Float(bitPattern: UInt32(bitPattern: OSAtomicAdd32Barrier(0, int32Field(context, peakOffset))))
+        let mean = Float(bitPattern: UInt32(bitPattern: OSAtomicAdd32Barrier(0, int32Field(context, rmsOffset))))
+        return (peak, mean)
+    }
+
     /// Stops reading the tap first, so `mutedWhenTapped` releases the app, then destroys it.
     func stop() {
         guard !stopped else { return }
@@ -234,7 +242,9 @@ final class ProcessVolumeTap: @unchecked Sendable {
             inputInterleaved: isInterleaved(inputFormat) ? 1 : 0,
             outputInterleaved: isInterleaved(outputFormat) ? 1 : 0,
             tapChannelOffset: Int32(tapOffset),
-            tapChannelCount: Int32(tapChannels)))
+            tapChannelCount: Int32(tapChannels),
+            peakBits: 0,
+            rmsBits: 0))
         resources.context = context
 
         var proc: AudioDeviceIOProcID?
@@ -279,6 +289,9 @@ private struct TapContext {
     /// First input channel that belongs to the process tap. Hardware inputs, if any, come before it.
     var tapChannelOffset: Int32
     var tapChannelCount: Int32
+    /// Peak and mean square of the last buffer. Written only through OSAtomic.
+    var peakBits: Int32
+    var rmsBits: Int32
 }
 
 private let targetOffset = MemoryLayout<TapContext>.offset(of: \TapContext.targetBits) ?? 0
@@ -292,6 +305,8 @@ private let inputInterleavedOffset = MemoryLayout<TapContext>.offset(of: \TapCon
 private let outputInterleavedOffset = MemoryLayout<TapContext>.offset(of: \TapContext.outputInterleaved) ?? 32
 private let tapChannelOffsetOffset = MemoryLayout<TapContext>.offset(of: \TapContext.tapChannelOffset) ?? 36
 private let tapChannelCountOffset = MemoryLayout<TapContext>.offset(of: \TapContext.tapChannelCount) ?? 40
+private let peakOffset = MemoryLayout<TapContext>.offset(of: \TapContext.peakBits) ?? 44
+private let rmsOffset = MemoryLayout<TapContext>.offset(of: \TapContext.rmsBits) ?? 48
 
 /// Owns half-built Core Audio objects so a failed start cannot leave a tap muting an app.
 @available(macOS 14.4, *)
@@ -383,6 +398,8 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
     let step = floatField(context, stepOffset).pointee
     let frames = outFrames
     var frame = 0
+    var peak: Float = 0
+    var sum: Float = 0
     while frame < frames {
         if gain < target {
             gain += step
@@ -413,12 +430,29 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
                 _ = OSAtomicCompareAndSwap32Barrier(0, 1, int32Field(context, faultOffset))
                 return false
             }
+            let magnitude = sample < 0 ? -sample : sample
+            if magnitude > peak { peak = magnitude }
+            sum += sample * sample
             channel += 1
         }
         frame += 1
     }
     gainSlot.pointee = gain
+    // Strided aggregate buffers are not one contiguous channel, so this stays in the loop
+    // instead of calling vDSP. No allocation, and the words are stored atomically.
+    let counted = Float(max(frames * min(outChannels, tapChannels), 1))
+    storeAtomicFloat(peak, context, peakOffset)
+    storeAtomicFloat(sum / counted, context, rmsOffset)
     return true
+}
+
+private func storeAtomicFloat(_ value: Float, _ context: UnsafeMutablePointer<TapContext>, _ offset: Int) {
+    let new = Int32(bitPattern: value.bitPattern)
+    let ptr = int32Field(context, offset)
+    while true {
+        let old = OSAtomicAdd32Barrier(0, ptr)
+        if old == new || OSAtomicCompareAndSwap32Barrier(old, new, ptr) { return }
+    }
 }
 
 private func floatField(_ context: UnsafeMutablePointer<TapContext>, _ offset: Int) -> UnsafeMutablePointer<Float> {

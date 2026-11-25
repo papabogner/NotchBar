@@ -54,7 +54,7 @@ enum NotchMenu {
         let hud = vm.hudService
         addQuickItems(to: menu, vm: vm)
         let hotkeys = Item("Global Hotkeys", checked: vm.hotkeys.isEnabled) { vm.hotkeys.setEnabled(!vm.hotkeys.isEnabled) }
-        hotkeys.toolTip = "⌃⌥N opens or closes the notch. ⌃⌥M mutes the system output. ⌃⌥S recalls the next saved scene."
+        hotkeys.toolTip = "⌃⌥N opens or closes the notch. ⌃⌥M mutes the system output."
         menu.addItem(hotkeys)
         let awake = Item("Keep Awake", checked: vm.awake.isOn) { vm.awake.toggle() }
         awake.toolTip = "Stops this Mac from idle-sleeping. The display can still dim. A cup shows in the notch while it is on."

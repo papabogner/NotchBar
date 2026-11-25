@@ -128,7 +128,7 @@ Banners drop from the notch for a moment, then tuck back in.
 - **Lock Screen** and battery level in the header.
 - **Show only what you use.** Hide any tab from **… > Show Tabs**, and turn off banners you don't want from the same menu.
 - **Appearance.** **… > Appearance…** is a live sheet: Black, Glass, Tinted Glass, or Gradient, an accent, type, size, corners, density, and fader shape. Presets are Midnight, Liquid Glass, Neon, Paper, and Pabo. Glass uses the system glass effect on macOS 26 and a blurred panel on earlier systems. The band that meets the hardware stays black.
-- **Global Hotkeys.** Off until **… > Global Hotkeys**. Then ⌃⌥N opens or closes the notch, ⌃⌥M mutes the system output, and ⌃⌥S recalls the next saved scene.
+- **Global Hotkeys.** Off until **… > Global Hotkeys**. Then ⌃⌥N opens or closes the notch, and ⌃⌥M mutes the system output. Saved scenes stay on disk, and the mixer no longer shows them.
 - **Keep Awake.** **… > Keep Awake** holds an idle-sleep assertion. A cup icon shows in the notch while it is on. The display can still dim.
 - **File Shelf.** Off until **… > File Shelf**. Drop files on the open notch to park them, click one to show it in Finder, or drag it back out.
 - **Ducking.** Off until **… > Duck Other Apps**. Zoom, Teams, FaceTime, Webex, an optional browser Meet tab, or one chosen app lowers everything else to a quarter, then restores it.

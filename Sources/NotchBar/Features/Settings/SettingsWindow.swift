@@ -182,7 +182,6 @@ private struct SettingsRoot: View {
             Toggle("Globale Kurzbefehle", isOn: Binding(get: { vm.hotkeys.isEnabled }, set: { vm.hotkeys.setEnabled($0) }))
             LabeledContent("Notch öffnen", value: "⌃⌥N")
             LabeledContent("Stumm", value: "⌃⌥M")
-            LabeledContent("Nächste Szene", value: "⌃⌥S")
             LabeledContent("Einstellungen", value: "⌘,")
         }
         .formStyle(.grouped)
