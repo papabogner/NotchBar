@@ -127,9 +127,11 @@ enum Snapshotter {
 
         let clearBackground = ProcessInfo.processInfo.environment["NOTCHBAR_SNAPSHOT_CLEAR"] == "1"
         func render(_ name: String, media: MediaController = music, usage: ClaudeUsageStore = live, timer: TimerModel = idleTimer,
-                    clipboard: ClipboardStore = clips, dictation: DictationMonitor? = nil, configure: (NotchViewModel) -> Void = { _ in }) {
+                    clipboard: ClipboardStore = clips, dictation: DictationMonitor? = nil,
+                    volumes: AppVolumeMixer? = nil, configure: (NotchViewModel) -> Void = { _ in }) {
             let vm = NotchViewModel(media: media, usage: usage, timer: timer, hudService: HUDService(), clipboard: clipboard, calendar: calendar,
-                                    weather: weather, dictation: dictation ?? noDictation, activity: activity)
+                                    weather: weather, dictation: dictation ?? noDictation, activity: activity,
+                                    volumes: volumes ?? AppVolumeMixer())
             configure(vm)
             let view = ZStack(alignment: .top) {
                 // NOTCHBAR_SNAPSHOT_CLEAR=1 leaves out the wallpaper, for compositing (the launch video).
@@ -189,6 +191,21 @@ enum Snapshotter {
         render("20-calendar", configure: expanded(.calendar))
         render("21-activity", configure: expanded(.activity))
         render("22-camera") { $0.isExpanded = true; $0.tab = .home; $0.toggleCamera() }
+        let mixer = AppVolumeMixer(preview: [
+            AppVolumeRow(id: "com.apple.Music", name: "Music", level: 78, muted: false, playing: true),
+            AppVolumeRow(id: "com.apple.Safari", name: "Safari", level: 40, muted: false, playing: true),
+            AppVolumeRow(id: "com.apple.podcasts", name: "Podcasts", level: 100, muted: true, playing: false),
+        ], previewMaster: MasterLevel(name: "Speakers", level: 64, muted: false))
+        render("23-mixer", volumes: mixer, configure: expanded(.mixer))
+        render("24-home-mixer", volumes: mixer) { vm in
+            vm.isExpanded = true
+            vm.tab = .home
+            vm.homeLayout.writesChanges = false
+            vm.homeLayout.setEnabled(.mixer, true)
+        }
+        let classic = AppVolumeMixer(preview: [])
+        classic.combineOnHome = false
+        render("00b-home-classic", volumes: classic, configure: expanded(.home))
     }
 
     private static func sampleArtwork() -> NSImage {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The open notch: a tab bar on either side of the camera, and the selected tab below.
 struct ExpandedNotch: View {
@@ -7,6 +8,7 @@ struct ExpandedNotch: View {
     @ObservedObject var usage: ClaudeUsageStore
     @ObservedObject var timer: TimerModel
     @Namespace private var tabHighlight
+    @State private var shelfTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,15 +18,39 @@ struct ExpandedNotch: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, vm.topRadius + 16)
-            .padding(.top, 12)
-            .padding(.bottom, vm.toast == nil ? 18 : 48)
+            .padding(.top, 10)
+            .padding(.bottom, vm.toast == nil ? 32 : 48)
+            if vm.shelf.showsBar {
+                FileShelfBar(shelf: vm.shelf)
+                    .padding(.horizontal, vm.topRadius + 16)
+                    .padding(.bottom, vm.toast == nil ? 8 : 36)
+            }
         }
         .overlay(alignment: .bottom) { toast }
+        .overlay {
+            if shelfTargeted {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.white.opacity(0.7), lineWidth: 1.5)
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: [UTType.fileURL], isTargeted: $shelfTargeted) { providers in
+            vm.shelf.receive(providers)
+        }
         .foregroundStyle(.white)
     }
 
     @ViewBuilder private var content: some View {
-        if vm.showsCamera {
+        if vm.showsMini {
+            MiniStatusPanel(mini: vm.mini) { vm.showsMini = false }
+        } else if vm.showsSpotify {
+            SpotifyConnectPanel(spotify: vm.spotify) { vm.showsSpotify = false }
+        } else if vm.showsTickerSettings {
+            TickerSettingsPanel(ticker: vm.ticker) { vm.showsTickerSettings = false }
+        } else if vm.showsAppearance {
+            AppearancePanel(appearance: vm.appearance) { vm.showsAppearance = false }
+        } else if vm.showsCamera {
             CameraGlancePanel(camera: vm.camera) { vm.toggleCamera() }
         } else {
             tabContent
@@ -34,13 +60,17 @@ struct ExpandedNotch: View {
     @ViewBuilder private var tabContent: some View {
         switch vm.tab {
         case .home:
-            HomePanel(vm: vm, media: media, usage: usage, timer: timer, calendar: vm.calendar, weather: vm.weather)
+            HomePanel(vm: vm, media: media, usage: usage, timer: timer, calendar: vm.calendar, weather: vm.weather,
+                      volumes: vm.volumes, layout: vm.homeLayout)
         case .media: MediaPanel(media: media)
         case .claude: ClaudePanel(vm: vm, usage: usage)
         case .timer: TimerPanel(timer: timer)
         case .clipboard: ClipboardPanel(store: vm.clipboard) { vm.copyClip($0, paste: $1) }
         case .calendar: CalendarPanel(calendar: vm.calendar)
         case .activity: ActivityPanel(monitor: vm.activity)
+        case .mixer: MixerPanel(mixer: vm.volumes, highlight: media.nowPlaying?.source.bundleID, spotify: vm.spotify,
+                                nowTitle: media.nowPlaying?.title, nowArtist: media.nowPlaying?.artist,
+                                nowBundle: media.nowPlaying?.source.bundleID, artwork: media.artwork)
         }
     }
 
@@ -67,7 +97,7 @@ struct ExpandedNotch: View {
     /// usually doesn't, and the highlighted icon and its tooltip have to do.
     private var showsTabLabel: Bool {
         let label = (vm.tab.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold)]).width
-        let others = CGFloat(vm.enabledTabs.count - 1)
+        let others = CGFloat(vm.visibleTabs.count - 1)
         let estimate = others * 25 + others * 2 + 4 + (20 + 13 + 5 + label) + 6
         return estimate <= sideWidth
     }
@@ -76,7 +106,7 @@ struct ExpandedNotch: View {
         let showsLabel = showsTabLabel
         return HStack(spacing: 0) {
             HStack(spacing: 2) {
-                ForEach(vm.enabledTabs) { tabButton($0, showsLabel: showsLabel) }
+                ForEach(vm.visibleTabs) { tabButton($0, showsLabel: showsLabel) }
             }
             .padding(2)
             .background(Capsule().fill(.white.opacity(0.06)))
@@ -85,6 +115,12 @@ struct ExpandedNotch: View {
             Spacer(minLength: vm.geometry.notchWidth + 16)
 
             HStack(spacing: 7) {
+                if vm.awake.isOn {
+                    Image(systemName: "cup.and.saucer.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .help("Keeping this Mac awake")
+                }
                 CameraButton(isOn: vm.showsCamera) { vm.toggleCamera() }
                 BatteryIndicator()
                 CircleIconButton(systemName: "lock.fill", size: 24, iconSize: 10.5, help: "Lock Screen") {
@@ -134,6 +170,7 @@ struct ExpandedNotch: View {
         case .clipboard: Image(systemName: "doc.on.clipboard").font(.system(size: 10.5, weight: .semibold))
         case .calendar: Image(systemName: "calendar").font(.system(size: 11, weight: .semibold))
         case .activity: Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 11, weight: .semibold))
+        case .mixer: Image(systemName: "slider.horizontal.3").font(.system(size: 11, weight: .semibold))
         }
     }
 }

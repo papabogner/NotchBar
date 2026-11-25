@@ -91,18 +91,24 @@ final class TranscriptScanner: @unchecked Sendable {
         let session = Self.sessionID(forTranscript: url.path)
         var consumed: UInt64 = 0
         var buffer = Data()
-        while let chunk = try? handle.read(upToCount: 4 << 20), !chunk.isEmpty {
-            buffer.append(chunk)
-            var start = buffer.startIndex
-            // Only whole lines: a line still being written is read next time.
-            while let newline = buffer[start...].firstIndex(of: 0x0A) {
-                let line = buffer[start..<newline]
-                if line.range(of: Self.usageNeedle) != nil { parseUsage(Data(line)) }
-                if let session, line.range(of: Self.interruptNeedle) != nil, isInterrupt(Data(line)) { interrupted.insert(session) }
-                consumed += UInt64(newline - start + 1)
-                start = buffer.index(after: newline)
+        // Each chunk in its own autorelease pool: reading gigabytes of transcripts at launch
+        // otherwise keeps every chunk alive until the scan ends (several GB of memory).
+        var reading = true
+        while reading {
+            autoreleasepool {
+                guard let chunk = try? handle.read(upToCount: 4 << 20), !chunk.isEmpty else { reading = false; return }
+                buffer.append(chunk)
+                var start = buffer.startIndex
+                // Only whole lines: a line still being written is read next time.
+                while let newline = buffer[start...].firstIndex(of: 0x0A) {
+                    let line = buffer[start..<newline]
+                    if line.range(of: Self.usageNeedle) != nil { parseUsage(Data(line)) }
+                    if let session, line.range(of: Self.interruptNeedle) != nil, isInterrupt(Data(line)) { interrupted.insert(session) }
+                    consumed += UInt64(newline - start + 1)
+                    start = buffer.index(after: newline)
+                }
+                buffer = Data(buffer[start...])
             }
-            buffer = Data(buffer[start...])
         }
         offsets[url.path] = offset + consumed
     }

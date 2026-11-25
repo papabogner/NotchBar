@@ -3,6 +3,7 @@ import SwiftUI
 /// The closed notch: a status on each side of the camera, and an optional banner below.
 struct CollapsedNotch: View {
     @ObservedObject var vm: NotchViewModel
+    @Environment(\.notchChrome) private var chrome
     @ObservedObject var media: MediaController
     @ObservedObject var usage: ClaudeUsageStore
     @ObservedObject var timer: TimerModel
@@ -20,14 +21,25 @@ struct CollapsedNotch: View {
                     .frame(width: balanced ?? vm.leftWing)
                     .frame(maxWidth: vm.isHovering ? .infinity : nil, maxHeight: .infinity)
                     .contentShape(Rectangle())
-                    .onTapGesture { vm.open(timer.isActive ? .timer : .media) }
+                    .onTapGesture {
+                        if vm.ticker.shows, vm.ticker.current?.url != nil { vm.ticker.openCurrent() }
+                        else { vm.open(timer.isActive ? .timer : .media) }
+                    }
 
                 Color.black.opacity(0.001)
                     .frame(width: vm.geometry.notchWidth)
                     .onTapGesture { vm.open(vm.preferredTab) }
 
                 ZStack {
-                    if vm.isEnabled(.claude) { LiveClaudeLogo(usage: usage, size: 13) }
+                    HStack(spacing: 3) {
+                        if vm.awake.isOn {
+                            Image(systemName: "cup.and.saucer.fill")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .help("Keeping this Mac awake")
+                        }
+                        if vm.usage.isMonitoring && vm.isEnabled(.claude) { LiveClaudeLogo(usage: usage, size: 13) }
+                    }
                 }
                 .frame(width: balanced ?? vm.rightWing)
                 .frame(maxWidth: vm.isHovering ? .infinity : nil, maxHeight: .infinity)
@@ -53,6 +65,12 @@ struct CollapsedNotch: View {
             DictationWing(source: source).transition(.scale(scale: 0.5).combined(with: .opacity))
         } else if timer.isActive && vm.isEnabled(.timer) {
             TimerWing(timer: timer).transition(.scale(scale: 0.6).combined(with: .opacity))
+        } else if vm.ticker.shows, let line = vm.ticker.current {
+            Text(line.text).font(chrome.font(11, weight: line.breaking ? .semibold : .medium)).lineLimit(1)
+                .foregroundStyle(line.breaking ? chrome.accent : .white)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 6)
+                .transition(.opacity)
         } else if playing && vm.banner != .nowPlaying {
             AudioWaves(isPlaying: true, color: Color(nsColor: media.accent), height: 13)
                 .transition(.scale(scale: 0.4).combined(with: .opacity))
@@ -78,6 +96,10 @@ struct CollapsedNotch: View {
             }) { vm.dismissBanner() }
         case .device(let event):
             DeviceBanner(event: event).id(event.name + (event.connected ? "+" : "-"))
+                .dismissable { vm.dismissBanner() }
+        case .agent(let text):
+            Text(text).font(.system(size: 13, weight: .semibold)).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .dismissable { vm.dismissBanner() }
         }
     }

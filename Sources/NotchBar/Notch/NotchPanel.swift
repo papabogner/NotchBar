@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// A borderless panel pinned over the notch. It never takes focus, so clicking the notch
-/// doesn't pull you out of the app you're in.
+/// A borderless panel pinned over the notch. It stays out of the keyboard until a text
+/// field is showing, so opening the notch does not pull you out of another app.
 final class NotchPanel: NSPanel {
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -20,8 +20,13 @@ final class NotchPanel: NSPanel {
         appearance = NSAppearance(named: .darkAqua)
     }
 
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
+    /// True only while a text field in the notch needs the keyboard. A normal open stays non-key.
+    var allowsTyping = false {
+        didSet { becomesKeyOnlyIfNeeded = !allowsTyping }
+    }
+
+    override var canBecomeKey: Bool { allowsTyping }
+    override var canBecomeMain: Bool { allowsTyping }
 }
 
 /// Lets the first click act on a control instead of only activating the window.

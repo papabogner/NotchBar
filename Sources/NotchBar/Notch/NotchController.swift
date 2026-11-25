@@ -13,7 +13,7 @@ import SwiftUI
 /// NotchBar follows each move until the pointer leaves the closed notch again.
 @MainActor
 final class NotchController {
-    static let canvas = CGSize(width: 800, height: 420)
+    static let canvas = CGSize(width: 800, height: 560)
 
     let panel: NotchPanel
     private let vm: NotchViewModel
@@ -21,6 +21,7 @@ final class NotchController {
     private var moveMonitors: [Any] = []
     private var clickMonitor: Any?
     private var collapseWork: DispatchWorkItem?
+    private var hoverOpenWork: DispatchWorkItem?
     private var observers: Set<AnyCancellable> = []
     private var sensorUpdateQueued = false
 
@@ -47,6 +48,13 @@ final class NotchController {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.expansionChanged(expanded) } }
         }
         .store(in: &observers)
+        Publishers.CombineLatest4(vm.$showsSpotify, vm.$showsMini, vm.$showsTickerSettings, vm.$showsAppearance)
+            .map { $0 || $1 || $2 || $3 }
+            .removeDuplicates()
+            .sink { [weak self] typing in
+                MainActor.assumeIsolated { self?.setTyping(typing) }
+            }
+            .store(in: &observers)
         vm.$hideFromScreenshots.removeDuplicates().sink { [weak self] hidden in
             guard let self else { return }
             // Windows that aren't shared are left out of screen capture by every screenshot
@@ -105,7 +113,7 @@ final class NotchController {
             if clickMonitor == nil {
                 clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                     MainActor.assumeIsolated {
-                        guard let self, self.vm.isExpanded, !self.pointerIsInside() else { return }
+                        guard let self, self.vm.isExpanded, !self.vm.acceptsText, !self.pointerIsInside() else { return }
                         self.vm.close()
                     }
                 }
@@ -157,6 +165,12 @@ final class NotchController {
             }
             withAnimation(.spring(response: 0.32, dampingFraction: 0.68)) { vm.isHovering = inside }
         }
+        if inside && !vm.isExpanded && vm.openOnHover {
+            scheduleHoverOpen()
+        } else {
+            hoverOpenWork?.cancel()
+            hoverOpenWork = nil
+        }
         guard vm.isExpanded else {
             collapseWork?.cancel()
             collapseWork = nil
@@ -167,17 +181,52 @@ final class NotchController {
             vm.isSticky = false
             collapseWork?.cancel()
             collapseWork = nil
+        } else if vm.acceptsText {
+            collapseWork?.cancel()
+            collapseWork = nil
         } else if collapseWork == nil && !vm.isSticky {
             // Close shortly after the pointer leaves, unless it comes back.
             let work = DispatchWorkItem { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.collapseWork = nil
-                    if !self.pointerIsInside() && !self.vm.isMenuOpen { self.vm.close() }
+                    if !self.pointerIsInside() && !self.vm.isMenuOpen && !self.vm.acceptsText { self.vm.close() }
                 }
             }
             collapseWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
         }
+    }
+
+    /// Opens after a pause so a pointer that only crosses the notch does not pop it open.
+    /// A click still opens immediately; if the notch is already open this does nothing.
+    private func scheduleHoverOpen() {
+        guard hoverOpenWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.hoverOpenWork = nil
+                guard self.pointerIsInside(), !self.vm.isExpanded, self.vm.openOnHover else { return }
+                let tab: NotchViewModel.Tab = (self.vm.mixerOnHover && self.vm.isEnabled(.mixer)) ? .mixer : self.vm.preferredTab
+                self.vm.open(tab)
+            }
+        }
+        hoverOpenWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    func showSettings() { SettingsWindow.show(vm: vm) }
+
+    /// The panel stays out of the way until a text field is on screen.
+    private func setTyping(_ on: Bool) {
+        panel.allowsTyping = on
+        guard on else {
+            if panel.isKeyWindow { panel.resignKey() }
+            return
+        }
+        collapseWork?.cancel()
+        collapseWork = nil
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
