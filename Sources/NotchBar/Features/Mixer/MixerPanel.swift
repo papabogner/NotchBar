@@ -187,7 +187,7 @@ struct MixerStripRow: View {
     }
 }
 
-private enum MixerLayout {
+enum MixerLayout {
     static let section: CGFloat = 16
     static let minStrip: CGFloat = 72
     static let maxStrip: CGFloat = 84
