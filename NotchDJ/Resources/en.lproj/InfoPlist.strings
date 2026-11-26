@@ -1,0 +1,5 @@
+/* Notch DJ, English. Permission prompts and the copyright line. */
+
+"NSAudioCaptureUsageDescription" = "Notch DJ changes the volume of single apps by processing their audio live on this Mac. Nothing is recorded, stored or sent anywhere.";
+"NSAppleEventsUsageDescription" = "Notch DJ shows the current track from Music and Spotify, and plays, pauses, skips and seeks when you ask it to.";
+"NSHumanReadableCopyright" = "Based on NotchBar by srisanthosh. GPLv3.";

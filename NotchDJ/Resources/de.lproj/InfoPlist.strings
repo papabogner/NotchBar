@@ -1,0 +1,5 @@
+/* Notch DJ, Deutsch. Texte der Systemabfragen und der Copyright-Hinweis. */
+
+"NSAudioCaptureUsageDescription" = "Notch DJ ändert die Lautstärke einzelner Apps, indem es ihren Ton live auf diesem Mac verarbeitet. Nichts wird aufgenommen, gespeichert oder irgendwohin gesendet.";
+"NSAppleEventsUsageDescription" = "Notch DJ zeigt den aktuellen Titel aus Musik und Spotify und spielt, pausiert, springt und spult, wenn du es möchtest.";
+"NSHumanReadableCopyright" = "Basiert auf NotchBar von srisanthosh. GPLv3.";

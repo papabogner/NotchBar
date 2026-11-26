@@ -9,8 +9,8 @@ enum TextRole: Sendable {
     case display, title, body, caption, label, value, bigValue
 }
 
-/// Everything a template can change about colour, shape and type. Controls read it from the
-/// environment, so HOME, MIXER, Settings and Onboarding follow the chosen template.
+/// Everything a template can change about color, shape and type. Controls read it from the
+/// environment, so HOME, MIXER and onboarding follow the chosen template.
 struct ThemeTokens {
     var isDark: Bool
     var panel: Color
@@ -57,7 +57,7 @@ struct ThemeTokens {
         }
     }
 
-    /// Meter colour for a normalized level.
+    /// Meter color for a normalized level.
     func meterColor(_ level: Float) -> Color {
         if level > 0.92 { return meterHot }
         if level > 0.75 { return meterMid }

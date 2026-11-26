@@ -7,12 +7,20 @@
     <key>CFBundleIdentifier</key><string>com.local.notchdj</string>
     <key>CFBundleExecutable</key><string>NotchDJ</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>0.2.0</string>
+    <key>CFBundleVersion</key><string>2</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>de</string>
+    </array>
+    <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSAudioCaptureUsageDescription</key><string>Notch DJ adjusts the volume of individual apps. Audio isn't recorded or stored.</string>
-    <key>NSAppleEventsUsageDescription</key><string>Notch DJ reads the current track from Music and Spotify. Nothing else is controlled.</string>
+    <key>NSHumanReadableCopyright</key><string>Based on NotchBar by srisanthosh. GPLv3.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>Notch DJ changes the volume of single apps by processing their audio live on this Mac. Nothing is recorded, stored or sent anywhere.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Notch DJ shows the current track from Music and Spotify, and plays, pauses, skips and seeks when you ask it to.</string>
 </dict>
 </plist>

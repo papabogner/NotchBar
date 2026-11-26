@@ -33,7 +33,7 @@ enum TemplateID: String, CaseIterable, Identifiable, Sendable {
 struct StudioTemplate: DJTemplate {
     var id: TemplateID { .studio }
     var name: String { String(localized: "Studio") }
-    var blurb: String { String(localized: "Clean and native, light or dark, in your accent colour.") }
+    var blurb: String { String(localized: "Clean and native, light or dark, in your accent color.") }
     var supportsLight: Bool { true }
     var supportsDark: Bool { true }
 
