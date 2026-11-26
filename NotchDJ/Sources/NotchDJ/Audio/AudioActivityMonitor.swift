@@ -49,6 +49,8 @@ final class AudioActivityMonitor {
     /// Extra listeners for the volume mixer. `onChange` stays a single callback so media
     /// detection is left exactly as it is; this list is empty until the mixer tab is open.
     private var playbackObservers: [UUID: () -> Void] = [:]
+    /// Auto-ducking listens here: a call app using the microphone is what counts as a call.
+    private var recordingObservers: [UUID: () -> Void] = [:]
     private var lastGroups: [PlayingProcessGroup] = []
     private var lastCapable: [CapableAudioApp] = []
     private var started = false
@@ -164,6 +166,8 @@ final class AudioActivityMonitor {
         guard apps != recording else { return }
         recording = apps
         onRecordingChange?()
+        let observers = recordingObservers
+        observers.values.forEach { $0() }
     }
 
     private func evaluate() {
@@ -208,13 +212,6 @@ final class AudioActivityMonitor {
         }
     }
 
-    /// Object id, PID and bundle id for each tapped process. For the mixer log only.
-    func mixerProcessDetail(_ objects: [AudioObjectID]) -> String {
-        objects.map { process in
-            "obj=\(process) pid=\(processID(of: process)) bundle=\(bundleID(of: process) ?? "?")"
-        }.joined(separator: " | ")
-    }
-
     func observePlayback(_ handler: @escaping () -> Void) -> UUID {
         let id = UUID()
         playbackObservers[id] = handler
@@ -227,6 +224,16 @@ final class AudioActivityMonitor {
             lastGroups = []
             lastCapable = []
         }
+    }
+
+    func observeRecording(_ handler: @escaping () -> Void) -> UUID {
+        let id = UUID()
+        recordingObservers[id] = handler
+        return id
+    }
+
+    func removeRecordingObserver(_ id: UUID) {
+        recordingObservers.removeValue(forKey: id)
     }
 
     /// Every regular app that owns a Core Audio process, playing or not.
@@ -250,23 +257,6 @@ final class AudioActivityMonitor {
             if lhs.playing != rhs.playing { return lhs.playing && !rhs.playing }
             return lhs.app.name.localizedCaseInsensitiveCompare(rhs.app.name) == .orderedAscending
         }
-    }
-
-    /// For the debug state: whether a microphone is on, whether NotchBar is checking, and every
-    /// process recording before filtering.
-    var debugRecordingSummary: String {
-        let raw = watched.filter { isRunning($0, &Self.isRunningInputAddress) }.map { bundleID(of: $0) ?? "pid \(processID(of: $0))" }
-        return "microphoneOn=\(microphoneOn) raw=\(raw.sorted())"
-    }
-
-    /// For the debug state: every process sending sound, before filtering, and what NotchBar keeps.
-    var debugPlaybackSummary: String {
-        let raw = watched.filter { isRunning($0, &Self.isRunningOutputAddress) }.map { process -> String in
-            let pid = processID(of: process)
-            let policy = NSRunningApplication(processIdentifier: pid).map { "\($0.activationPolicy.rawValue)" } ?? "-"
-            return "\(bundleID(of: process) ?? "?")(pid \(pid), policy \(policy))"
-        }
-        return "raw=\(raw.sorted()) kept=\(playing.map(\.bundleID)) watched=\(watched.count) live=\(processObjects().count)"
     }
 
     /// The app a CoreAudio process belongs to. Playback counts only apps with a Dock icon, which

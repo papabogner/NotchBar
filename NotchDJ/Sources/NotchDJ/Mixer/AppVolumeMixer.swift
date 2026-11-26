@@ -2,28 +2,26 @@
 // Original copyright remains with the NotchBar authors. Notch DJ changes are under the same license.
 import AppKit
 
-/// Which mixer face is showing. Stored, and switched from the mixer header.
-enum MixerFace: String, CaseIterable, Identifiable {
-    case mixer
-    case dj
-    var id: String { rawValue }
-    var title: String { self == .mixer ? "MIXER" : "DJ" }
-}
-
 /// Crossfader law. Applied only after the fader moves or a side is picked.
-enum CrossCurve: String, CaseIterable, Identifiable {
+enum CrossCurve: String, CaseIterable, Identifiable, Sendable {
     case smooth, dip, cut
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .smooth: return "SMOOTH"
-        case .dip: return "DIP"
-        case .cut: return "CUT"
+        case .smooth: return String(localized: "SMOOTH")
+        case .dip: return String(localized: "DIP")
+        case .cut: return String(localized: "CUT")
         }
     }
 }
 
-/// DJ tone controls. Stored only until a render-thread filter exists.
+enum DeckSide: String, CaseIterable, Identifiable, Sendable {
+    case a, b
+    var id: String { rawValue }
+    var letter: String { self == .a ? "A" : "B" }
+}
+
+/// DJ tone controls. Coefficients are built off the render thread and published through a seqlock.
 struct DeckTone: Equatable, Sendable {
     var hi = 0.5
     var mid = 0.5
@@ -40,9 +38,17 @@ struct DeckTone: Equatable, Sendable {
     }
 }
 
+/// Linear peaks per side and RMS of the last buffer, copied off the engine queue.
 struct TapMeter: Equatable, Sendable {
-    var peak: Float = 0
+    var left: Float = 0
+    var right: Float = 0
     var rms: Float = 0
+    var peak: Float { max(left, right) }
+}
+
+/// Whether macOS lets Notch DJ create process taps (System Audio Recording).
+enum CaptureStatus: String, Sendable {
+    case unknown, notDetermined, authorized, denied
 }
 
 /// One strip in the mixer. `playing` is false for an app that has a Core Audio process but is idle.
@@ -61,47 +67,41 @@ struct MasterLevel: Equatable {
     var name: String
     var level: Int
     var muted: Bool
+    var symbol: String = "speaker.wave.2.fill"
 }
 
-/// Per-app volume. Nothing is tapped, and no audio behaviour changes, until the user opens the
-/// Mixer tab and moves a slider off 100% (or mutes). At 100% and unmuted the tap is removed, so
-/// that app plays exactly as it does without NotchBar. A chosen output device is the exception:
-/// it is remembered and applied, because the tap is what sends the app there. Other levels are
-/// remembered per bundle ID, but they are not applied on the next launch until a slider moves.
+/// Per-app volume, decks and metering.
+///
+/// Nothing is tapped, and no audio behaviour changes, until something asks for it: a level other
+/// than 100%, mute, solo, a route, a crossfade, a tone, or ducking during a call. At 100% and
+/// unmuted the tap is removed, so that app plays exactly as it does without Notch DJ.
+///
+/// Remembered levels and routes are applied at launch only when System Audio Recording is
+/// already allowed, so launching never shows a permission prompt. While the panel is open and
+/// live meters are on, apps without a volume tap get a meter-only tap that leaves them unmuted.
 @MainActor
 final class AppVolumeMixer: ObservableObject {
     @Published private(set) var rows: [AppVolumeRow] = []
     /// Output devices for the strip menus. Refreshed with the row list, not on every redraw.
     @Published private(set) var outputChoices: [AudioDeviceChoice] = []
-    @Published private(set) var master = MasterLevel(name: "System", level: 100, muted: false)
-    /// When on, Home shows now playing and the mixer strips in one panel. Off restores the old Home.
-    @Published var combineOnHome: Bool {
-        didSet {
-            guard !isPreview else { return }
-            DJDefaults.suite.set(combineOnHome, forKey: Self.homeKey)
-        }
-    }
+    @Published private(set) var master = MasterLevel(name: String(localized: "System"), level: 100, muted: false)
     @Published private(set) var needsExplanation = false
     @Published private(set) var permissionDenied = false
     @Published private(set) var statusMessage: String?
     /// Saved levels are showing, but this launch hasn't applied them yet.
     @Published private(set) var showSavedHint = false
-    /// Option-click solo: every other app is silenced until solo is cleared.
+    /// CUE and S: every other app is silenced until solo is cleared.
     @Published private(set) var soloID: String?
-    /// While a call is playing, other apps are held down. Off until the menu turns it on.
+    /// While a call is on, other playing apps are turned down to `duckLevel` of their level.
     @Published private(set) var ducking = false
     @Published private(set) var duckBrowserMeet = false
     @Published private(set) var duckAppID: String?
+    @Published private(set) var duckLevel: Double = 0.25
     /// Applies the saved level, mute, and output when that app plays, without waiting for a slider.
-    @Published private(set) var autoApply = false
-    /// MIXER or DJ. The header control writes this.
-    @Published var face: MixerFace = .mixer {
-        didSet {
-            guard !isPreview else { return }
-            DJDefaults.suite.set(face.rawValue, forKey: "mixerFace")
-            refreshMetering()
-        }
-    }
+    @Published private(set) var autoApply = true
+    /// Meter-only taps for apps that have no volume tap, while the panel is open.
+    @Published private(set) var liveMeters = true
+    @Published private(set) var capture: CaptureStatus = .unknown
     @Published var crossCurve: CrossCurve = .smooth {
         didSet {
             guard !isPreview else { return }
@@ -110,10 +110,8 @@ final class AppVolumeMixer: ObservableObject {
         }
     }
     /// Deck EQ. Coefficients are built off the render thread and published through a seqlock.
-    @Published var toneA = DeckTone() { didSet { guard !isPreview else { return }; pushTones() } }
-    @Published var toneB = DeckTone() { didSet { guard !isPreview else { return }; pushTones() } }
-    /// Peak and RMS copied off the engine queue, at most 30 times a second, while the mixer is open.
-    @Published private(set) var deckMeters: [String: TapMeter] = [:]
+    @Published private(set) var toneA = DeckTone() { didSet { guard !isPreview else { return }; pushTones() } }
+    @Published private(set) var toneB = DeckTone() { didSet { guard !isPreview else { return }; pushTones() } }
     /// Idle apps stay off the strip until this is on. They stay greyed out.
     @Published var showSilentApps = false {
         didSet {
@@ -121,16 +119,21 @@ final class AppVolumeMixer: ObservableObject {
             DJDefaults.suite.set(showSilentApps, forKey: "showSilentApps")
         }
     }
-    /// 0 is app A, 1 is app B. Equal-power, and only a multiplier on each app's own level.
+    /// 0 is app A, 1 is app B. Only a multiplier on each app's own level.
     @Published private(set) var crossfade = 0.5
     @Published private(set) var crossA: String?
     @Published private(set) var crossB: String?
-    /// Extra bundles that count as the call, such as a browser tab on Meet. Set after init.
+
+    /// Peaks for the meters. Not published: meter views read it 30 times a second.
+    let meters: MeterBank
+    /// Extra bundles that count as the call. Set after init.
     var additionalCallBundles: @MainActor () -> Set<String> = { [] }
+    /// A tap started (true) or was refused for permission (false). The permission store listens.
+    var onCaptureResult: (@MainActor (Bool) -> Void)?
+
     private var duckGain: [String: Float] = [:]
-    /// Bundle IDs that were sending sound recently, newest first. Home uses these when
-    /// the live "playing" flag has not caught up yet.
-    private var recentPlaying: [String] = []
+    /// The Music or Spotify app that is playing, so deck A starts on it.
+    private var preferredDeckApp: String?
 
     private let systemAudio: SystemAudio
     private let activity: AudioActivityMonitor
@@ -139,14 +142,15 @@ final class AppVolumeMixer: ObservableObject {
     /// Output device UID per bundle ID. Missing means the system default, and no tap at 100%.
     private var routes: [String: String] = [:]
     private var explained: Bool
-    /// Set for this launch once a slider actually asks for a tap. Not stored.
+    /// Set for this launch once a control actually asks for a tap. Not stored.
     private var engaged = false
     private var isVisible = false
-    /// Home is showing the compact strips. Listing apps here still does not create taps.
-    private var homeVisible = false
     private var playbackToken: UUID?
+    private var recordingToken: UUID?
     private var outputToken: UUID?
     private var volumeToken: UUID?
+    /// Meter taps outlive a close by a moment, so a quick reopen doesn't rebuild them.
+    private var meterLinger: DispatchWorkItem?
     /// The crossfader is drawn before it changes any audio. Taps wait for a move or an explicit pick.
     private var crossfadeEngaged = false
     /// Coalesces tap work. A burst of slider moves becomes one pass.
@@ -167,14 +171,24 @@ final class AppVolumeMixer: ObservableObject {
 
     private static let levelsKey = "appVolumeLevels"
     private static let explainedKey = "appVolumeExplained"
-    private static let homeKey = "homeMixerCombined"
     private static let routesKey = "appOutputRoutes"
     private static let duckKey = "mixerDucking"
     private static let duckMeetKey = "mixerDuckMeet"
     private static let duckAppKey = "mixerDuckApp"
+    private static let duckLevelKey = "mixerDuckLevel"
     private static let autoApplyKey = "appVolumeAutoApply"
+    private static let liveMetersKey = "liveMeters"
+    /// Call and voice apps. A call is on while one of them uses the microphone.
     private static let callBundles: Set<String> = [
-        "us.zoom.xos", "com.apple.FaceTime", "com.microsoft.teams", "com.microsoft.teams2", "com.cisco.webexmeetingsapp"
+        "us.zoom.xos", "com.apple.FaceTime", "com.microsoft.teams", "com.microsoft.teams2",
+        "com.cisco.webexmeetingsapp", "Cisco-Systems.Spark", "com.hnc.Discord", "com.tinyspeck.slackmacgap",
+        "com.skype.skype", "net.whatsapp.WhatsApp", "ru.keepcoder.Telegram", "org.whispersystems.signal-desktop",
+    ]
+    /// Browsers count as the call while they use the microphone, when that option is on.
+    private static let browserBundles: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.beta", "com.apple.Safari", "company.thebrowser.Browser",
+        "com.microsoft.edgemac", "com.brave.Browser", "org.mozilla.firefox", "com.vivaldi.Vivaldi",
+        "com.operasoftware.Opera", "org.chromium.Chromium",
     ]
 
     init(systemAudio: SystemAudio? = nil, activity: AudioActivityMonitor? = nil, preview: [AppVolumeRow]? = nil,
@@ -186,27 +200,97 @@ final class AppVolumeMixer: ObservableObject {
         let monitor = activity ?? AudioActivityMonitor.shared
         self.systemAudio = audio
         self.activity = monitor
+        meters = MeterBank(simulated: preview != nil)
         if let sample = preview {
             rows = sample
             isPreview = true
             explained = true
-            combineOnHome = true
+            capture = .authorized
             if let previewMaster { master = previewMaster }
+            let playing = sample.filter(\.playing)
+            crossA = playing.first?.id ?? sample.first?.id
+            crossB = playing.dropFirst().first?.id ?? sample.dropFirst().first?.id
+            crossfade = 0.36
+            toneA = DeckTone(hi: 0.58, mid: 0.5, low: 0.66, filter: 0.5, gain: 0.5)
+            toneB = DeckTone(hi: 0.5, mid: 0.44, low: 0.3, filter: 0.62, gain: 0.5)
             return
         }
         isPreview = false
         saved = Self.loadSaved()
         routes = Self.loadRoutes()
         explained = DJDefaults.suite.bool(forKey: Self.explainedKey)
-        combineOnHome = DJDefaults.suite.object(forKey: Self.homeKey) as? Bool ?? true
         ducking = DJDefaults.suite.bool(forKey: Self.duckKey)
         duckBrowserMeet = DJDefaults.suite.bool(forKey: Self.duckMeetKey)
         duckAppID = DJDefaults.suite.string(forKey: Self.duckAppKey)
-        autoApply = DJDefaults.suite.bool(forKey: Self.autoApplyKey)
+        duckLevel = DJDefaults.suite.object(forKey: Self.duckLevelKey) as? Double ?? 0.25
+        autoApply = DJDefaults.suite.object(forKey: Self.autoApplyKey) as? Bool ?? true
+        liveMeters = DJDefaults.suite.object(forKey: Self.liveMetersKey) as? Bool ?? true
         showSilentApps = DJDefaults.suite.bool(forKey: "showSilentApps")
-        face = MixerFace(rawValue: DJDefaults.suite.string(forKey: "mixerFace") ?? "") ?? .mixer
         crossCurve = CrossCurve(rawValue: DJDefaults.suite.string(forKey: "mixerCrossCurve") ?? "") ?? .smooth
     }
+
+    // MARK: Permission
+
+    /// The launch check and every later check land here. Remembered levels, routes and ducking
+    /// only start once this says `authorized`, so a launch never prompts.
+    func setCaptureStatus(_ status: CaptureStatus) {
+        guard !isPreview, status != capture else { return }
+        capture = status
+        switch status {
+        case .authorized:
+            if !explained {
+                explained = true
+                DJDefaults.suite.set(true, forKey: Self.explainedKey)
+            }
+            needsExplanation = false
+            if permissionDenied {
+                permissionDenied = false
+                statusMessage = nil
+            }
+            if #available(macOS 14.4, *) { (engineBox as? MixerEngine)?.unsuppressAll() }
+            updateHooks()
+            refreshDuck()
+            syncTaps()
+        case .denied:
+            permissionDenied = true
+            // Taps stop receiving audio once access is withdrawn, and a muted app would stay silent.
+            if #available(macOS 14.4, *) { (engineBox as? MixerEngine)?.stopAll() }
+            syncTaps()
+        case .notDetermined, .unknown:
+            break
+        }
+    }
+
+    /// The user said yes in the banner. The tap that follows shows the system prompt.
+    func acceptExplanation() {
+        guard !isPreview else { return }
+        explained = true
+        needsExplanation = false
+        DJDefaults.suite.set(true, forKey: Self.explainedKey)
+        updateHooks()
+        syncTaps()
+    }
+
+    func declineExplanation() {
+        needsExplanation = false
+    }
+
+    func dismissStatus() {
+        statusMessage = nil
+    }
+
+    func openPrivacySettings() {
+        let urls = [
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AudioCapture",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture",
+        ]
+        for text in urls {
+            guard let url = URL(string: text), NSWorkspace.shared.open(url) else { continue }
+            return
+        }
+    }
+
+    // MARK: Settings
 
     func setDucking(_ on: Bool) {
         guard !isPreview else { return }
@@ -238,72 +322,51 @@ final class AppVolumeMixer: ObservableObject {
         syncTaps()
     }
 
+    func setDuckLevel(_ level: Double) {
+        guard !isPreview else { return }
+        duckLevel = min(0.8, max(0, level))
+        DJDefaults.suite.set(duckLevel, forKey: Self.duckLevelKey)
+        refreshDuck()
+        syncTaps()
+    }
+
     /// When on, a saved level is applied as soon as that app plays.
     func setAutoApply(_ on: Bool) {
         guard !isPreview else { return }
         autoApply = on
         DJDefaults.suite.set(on, forKey: Self.autoApplyKey)
-        guard on else {
-            updateHooks()
-            syncTaps()
-            return
-        }
-        let wantsTap = saved.contains { $0.value.muted || $0.value.level != 100 }
-        if wantsTap && !explained {
-            needsExplanation = true
-            return
-        }
-        if wantsTap { engaged = true }
         updateHooks()
         syncTaps()
     }
 
-    /// Applies remembered levels once this object exists, when that option is on.
-    func activateAutoApplyIfNeeded() {
-        guard autoApply, !isPreview else { return }
-        setAutoApply(true)
-    }
-
-    /// Starts listening for a call if ducking was left on. Called after init, not from it.
-    func activateDuckingIfNeeded() {
-        guard ducking, !isPreview else { return }
-        updateHooks()
-        refreshDuck()
+    func setLiveMeters(_ on: Bool) {
+        guard !isPreview else { return }
+        liveMeters = on
+        DJDefaults.suite.set(on, forKey: Self.liveMetersKey)
+        if !on { meters.clear() }
         syncTaps()
     }
 
-    /// Applies a remembered per-app output once this object is fully initialized.
-    /// Called by the owner, not from `init`, because it installs closures that capture self.
-    func applySavedRoutesIfNeeded() {
-        guard !isPreview, !routes.isEmpty else { return }
-        updateHooks()
-        syncTaps()
-    }
-
-    /// For the debug state.
-    var debugSummary: String {
-        let taps: Int
-        if #available(macOS 14.4, *) {
-            taps = (engineBox as? MixerEngine)?.tapCount ?? 0
-        } else {
-            taps = 0
-        }
-        return "engaged=\(engaged) visible=\(isVisible) home=\(homeVisible) taps=\(taps) explained=\(explained) denied=\(permissionDenied) saved=\(saved.count)"
+    func setShowSilent(_ on: Bool) {
+        showSilentApps = on
     }
 
     /// Saved levels are on the faders, but this launch has not applied them yet.
     var needsApplyHint: Bool {
-        !isPreview && !engaged && rows.contains { $0.level != 100 || $0.muted }
+        !isPreview && !engaged && !(autoApply && capture == .authorized) && rows.contains { $0.level != 100 || $0.muted }
     }
 
-    /// Home is using the combined now-playing and mixer panel.
-    var showsCombinedHome: Bool { combineOnHome && (homeVisible || isPreview) }
+    var canRemember: Bool { capture == .authorized }
 
-    func setSurfaces(mixerTab: Bool, home: Bool) {
-        guard !isPreview else { return }
-        isVisible = mixerTab
-        homeVisible = home
-        if mixerTab || home {
+    // MARK: Visibility
+
+    /// The panel opened or closed. Listing apps never creates taps by itself; meters do, when allowed.
+    func setPanelVisible(_ visible: Bool) {
+        guard !isPreview, visible != isVisible else { return }
+        isVisible = visible
+        meterLinger?.cancel()
+        meterLinger = nil
+        if visible {
             activity.start()
             refreshOutputChoices()
             publishRows()
@@ -311,25 +374,81 @@ final class AppVolumeMixer: ObservableObject {
         }
         updateHooks()
         refreshMetering()
+        if visible {
+            if wantsMeters { syncTaps() }
+        } else if liveMeters && capture == .authorized {
+            let work = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, !self.isVisible else { return }
+                    self.meterLinger = nil
+                    self.syncTaps()
+                }
+            }
+            meterLinger = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+        }
     }
 
-    func setShowSilent(_ on: Bool) {
-        showSilentApps = on
+    /// Deck A starts on this app when nothing is picked yet. Not published.
+    func setPreferredDeckApp(_ bundleID: String?) {
+        preferredDeckApp = bundleID
+    }
+
+    // MARK: Decks
+
+    func deckID(_ side: DeckSide) -> String? { side == .a ? crossA : crossB }
+
+    func tone(_ side: DeckSide) -> DeckTone { side == .a ? toneA : toneB }
+
+    func row(_ id: String?) -> AppVolumeRow? {
+        guard let id else { return nil }
+        return rows.first { $0.id == id }
+    }
+
+    func deckRow(_ side: DeckSide) -> AppVolumeRow? { row(deckID(side)) }
+
+    func setTone(_ side: DeckSide, _ tone: DeckTone) {
+        if !isPreview && !explained && !tone.isFlat {
+            needsExplanation = true
+            return
+        }
+        if side == .a { toneA = tone } else { toneB = tone }
+    }
+
+    func assign(_ side: DeckSide, _ id: String?) {
+        if side == .a { setCrossA(id) } else { setCrossB(id) }
+    }
+
+    func setDeckLevel(_ side: DeckSide, _ level: Int) {
+        guard let id = deckID(side) else { return }
+        setLevel(id, level)
+    }
+
+    func toggleCue(_ side: DeckSide) {
+        guard let id = deckID(side) else { return }
+        toggleSolo(id)
     }
 
     /// Moves the crossfader. The saved level of each app stays as it was.
     /// Leaving center is what arms the taps. Sitting at the default does not.
     func setCrossfade(_ value: Double) {
-        guard !isPreview else { return }
         let next = min(1, max(0, value))
         guard abs(next - crossfade) > 0.0005 else { return }
+        if isPreview {
+            crossfade = next
+            return
+        }
         if abs(next - 0.5) > 0.0005 { crossfadeEngaged = true }
         crossfade = next
         syncTaps()
     }
 
     func setCrossA(_ id: String?) {
-        guard !isPreview else { return }
+        if isPreview {
+            crossA = id
+            if let id, crossB == id { crossB = nil }
+            return
+        }
         if id != nil { crossfadeEngaged = true }
         crossA = id
         if let id, crossB == id { crossB = nil }
@@ -337,17 +456,23 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     func setCrossB(_ id: String?) {
-        guard !isPreview else { return }
+        if isPreview {
+            crossB = id
+            if let id, crossA == id { crossA = nil }
+            return
+        }
         if id != nil { crossfadeEngaged = true }
         crossB = id
         if let id, crossA == id { crossA = nil }
         syncTaps()
     }
 
-    /// Fills empty menus with the loudest playing apps. Does not start taps.
+    /// Fills empty decks with the playing apps, Music or Spotify first. Does not start taps.
     private func assignDefaultCrossPairIfNeeded() {
         guard isVisible, !crossfadeEngaged else { return }
+        let preferred = preferredDeckApp
         let loud = rows.filter(\.playing).sorted { lhs, rhs in
+            if (lhs.id == preferred) != (rhs.id == preferred) { return lhs.id == preferred }
             if lhs.level != rhs.level { return lhs.level > rhs.level }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
@@ -372,20 +497,23 @@ final class AppVolumeMixer: ObservableObject {
         }
     }
 
-    /// Copies tap peaks while the mixer tab is open. Does nothing until a tap engine exists.
+    // MARK: Meters
+
+    /// Copies tap peaks while the panel is open. Does nothing until a tap engine exists.
     private func refreshMetering() {
         guard !isPreview else { return }
         guard #available(macOS 14.4, *) else { return }
         (engineBox as? MixerEngine)?.setMetering(isVisible)
-        if !isVisible, !deckMeters.isEmpty { deckMeters = [:] }
     }
 
     fileprivate func applyMeters(_ levels: [String: TapMeter]) {
         guard isVisible else { return }
-        if levels != deckMeters { deckMeters = levels }
+        meters.ingest(levels, now: MeterBank.now)
     }
 
-    var masterPeak: Float { deckMeters.values.map(\.peak).max() ?? 0 }
+    private var wantsMeters: Bool {
+        !isPreview && isVisible && liveMeters && capture == .authorized && !permissionDenied
+    }
 
     private func toneMap() -> [String: DeckTone] {
         var map: [String: DeckTone] = [:]
@@ -402,25 +530,32 @@ final class AppVolumeMixer: ObservableObject {
         syncTaps()
     }
 
+    // MARK: Levels
+
     func setMasterLevel(_ level: Int) {
-        guard !isPreview else { return }
         let clamped = min(100, max(0, level))
+        if isPreview {
+            master.level = clamped
+            return
+        }
         systemAudio.setVolume(Float(clamped) / 100)
         master.level = clamped
         if clamped > 0 { master.muted = false }
     }
 
     func toggleMasterMute() {
-        guard !isPreview else { return }
         let next = !master.muted
-        systemAudio.setMuted(next)
+        if !isPreview { systemAudio.setMuted(next) }
         master.muted = next
     }
 
     func setLevel(_ bundleID: String, _ level: Int) {
-        guard !isPreview else { return }
-        guard #available(macOS 14.4, *) else { return }
         let clamped = min(150, max(0, level))
+        if isPreview {
+            if let index = rows.firstIndex(where: { $0.id == bundleID }) { rows[index].level = clamped }
+            return
+        }
+        guard #available(macOS 14.4, *) else { return }
         let muted = saved[bundleID]?.muted ?? false
         let unchanged = (saved[bundleID]?.level ?? 100) == clamped
         // After a relaunch the fader still shows the saved level, but nothing is tapped until
@@ -434,7 +569,10 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     func toggleMute(_ bundleID: String) {
-        guard !isPreview else { return }
+        if isPreview {
+            if let index = rows.firstIndex(where: { $0.id == bundleID }) { rows[index].muted.toggle() }
+            return
+        }
         guard #available(macOS 14.4, *) else { return }
         let muted = saved[bundleID]?.muted ?? false
         let level = saved[bundleID]?.level ?? 100
@@ -448,7 +586,10 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     func toggleSolo(_ bundleID: String) {
-        guard !isPreview else { return }
+        if isPreview {
+            soloID = soloID == bundleID ? nil : bundleID
+            return
+        }
         guard #available(macOS 14.4, *) else { return }
         if !explained {
             needsExplanation = true
@@ -460,29 +601,18 @@ final class AppVolumeMixer: ObservableObject {
         syncTaps()
     }
 
-    func acceptExplanation() {
+    /// Puts every app back to 100%, unmuted, on the default output.
+    func resetAll() {
         guard !isPreview else { return }
-        explained = true
-        needsExplanation = false
-        DJDefaults.suite.set(true, forKey: Self.explainedKey)
-        if autoApply { engaged = true }
+        saved = [:]
+        routes = [:]
+        soloID = nil
+        persist()
+        persistRoutes()
+        statusMessage = nil
+        publishRows()
         updateHooks()
         syncTaps()
-    }
-
-    func declineExplanation() {
-        needsExplanation = false
-    }
-
-    func openPrivacySettings() {
-        let urls = [
-            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AudioCapture",
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture",
-        ]
-        for text in urls {
-            guard let url = URL(string: text), NSWorkspace.shared.open(url) else { continue }
-            return
-        }
     }
 
     // MARK: Applying levels
@@ -496,7 +626,7 @@ final class AppVolumeMixer: ObservableObject {
         }
         persist()
         statusMessage = nil
-        permissionDenied = false
+        if capture != .denied { permissionDenied = false }
         needsExplanation = false
         if #available(macOS 14.4, *) { (engineBox as? MixerEngine)?.unsuppress(bundleID) }
         publishRows()
@@ -504,17 +634,22 @@ final class AppVolumeMixer: ObservableObject {
         syncTaps()
     }
 
+    private var savedWantsTap: Bool {
+        saved.contains { $0.value.muted || $0.value.level != 100 }
+    }
+
     /// A tap is wanted after a slider moves off 100%, the app is muted, or it has its own output device.
+    /// Remembered state (levels, routes, ducking) only counts once capture is allowed.
     private var needsActiveTaps: Bool {
+        let allowed = capture == .authorized
         if soloID != nil { return true }
-        if !routes.isEmpty { return true }
-        if !duckGain.isEmpty { return true }
+        if !routes.isEmpty && (allowed || engaged) { return true }
+        if !duckGain.isEmpty && allowed { return true }
         if crossGains.values.contains(where: { $0 < 0.999 }) { return true }
-        if let id = crossA, !toneA.isFlat { return true }
-        if let id = crossB, id != crossA, !toneB.isFlat { return true }
-        let savedWants = saved.contains { $0.value.muted || $0.value.level != 100 }
-        if autoApply && savedWants { return true }
-        return engaged && savedWants
+        if crossA != nil && !toneA.isFlat { return true }
+        if let b = crossB, b != crossA, !toneB.isFlat { return true }
+        if autoApply && allowed && savedWantsTap { return true }
+        return engaged && savedWantsTap
     }
 
     /// Waits out a burst of changes, then applies the latest levels. Never calls Core Audio itself.
@@ -541,7 +676,8 @@ final class AppVolumeMixer: ObservableObject {
         }
         let rebuild = rebuildNext
         rebuildNext = false
-        guard needsActiveTaps else {
+        let meterTaps = wantsMeters
+        guard needsActiveTaps || meterTaps else {
             (engineBox as? MixerEngine)?.stopAll()
             refreshMetering()
             return
@@ -550,13 +686,14 @@ final class AppVolumeMixer: ObservableObject {
         let job = MixerEngine.Job(
             saved: saved.mapValues { MixerEngine.Level(level: $0.level, muted: $0.muted) },
             groups: activity.mixerProcessGroups(),
-            permissionDenied: permissionDenied,
+            permissionDenied: permissionDenied || capture == .denied,
             solo: soloID,
             routes: routes,
             duck: duckGain,
             cross: crossGains,
             rebuild: rebuild,
-            tones: toneMap()
+            tones: toneMap(),
+            meters: meterTaps
         )
         engine().submit(job)
         refreshMetering()
@@ -566,6 +703,8 @@ final class AppVolumeMixer: ObservableObject {
     @available(macOS 14.4, *)
     fileprivate func applyEngine(_ outcome: MixerEngine.Outcome) {
         if outcome.completesSync { syncInFlight = false }
+        if outcome.started && capture != .authorized { onCaptureResult?(true) }
+        if outcome.meterPermissionDenied { onCaptureResult?(false) }
         var again = false
         if !outcome.deviceGone.isEmpty {
             for id in outcome.deviceGone { routes.removeValue(forKey: id) }
@@ -573,16 +712,18 @@ final class AppVolumeMixer: ObservableObject {
             again = true
         }
         for problem in outcome.problems {
-            let name = rows.first { $0.id == problem.id }?.name ?? "That app"
+            let name = rows.first { $0.id == problem.id }?.name ?? String(localized: "That app")
             mixerLog.error("mixer \(name, privacy: .public) \(problem.detail, privacy: .public)")
             if problem.permission {
                 permissionDenied = true
-                statusMessage = "\(name): \(problem.detail)"
+                statusMessage = problem.detail
+                onCaptureResult?(false)
                 continue
             }
             saved.removeValue(forKey: problem.id)
             persist()
-            statusMessage = "Couldn't change \(name). \(problem.detail) Left at normal volume."
+            let detail = problem.detail
+            statusMessage = String(localized: "Couldn't change \(name). \(detail) It's back at normal volume.")
             publishRows()
             updateHooks()
         }
@@ -600,7 +741,7 @@ final class AppVolumeMixer: ObservableObject {
     }
 
     private func updateHooks() {
-        let watching = isVisible || homeVisible || needsActiveTaps || ducking
+        let watching = isVisible || needsActiveTaps || ducking
         if watching {
             activity.start()
             if playbackToken == nil {
@@ -612,8 +753,18 @@ final class AppVolumeMixer: ObservableObject {
             activity.removePlaybackObserver(playbackToken)
             self.playbackToken = nil
         }
-        // The master fader is on screen with the mixer tab or the combined Home panel.
-        if isVisible || homeVisible {
+        if ducking {
+            if recordingToken == nil {
+                recordingToken = activity.observeRecording { [weak self] in
+                    MainActor.assumeIsolated { self?.recordingChanged() }
+                }
+            }
+        } else if let recordingToken {
+            activity.removeRecordingObserver(recordingToken)
+            self.recordingToken = nil
+        }
+        // The master control is on screen only with the panel.
+        if isVisible {
             if volumeToken == nil {
                 volumeToken = systemAudio.addVolumeHandler { [weak self] _, _ in
                     MainActor.assumeIsolated { self?.refreshMaster() }
@@ -644,34 +795,50 @@ final class AppVolumeMixer: ObservableObject {
     private func refreshMaster() {
         guard !isPreview else { return }
         let level = min(100, max(0, Int((systemAudio.volume * 100).rounded())))
-        let next = MasterLevel(name: systemAudio.outputName, level: level, muted: systemAudio.isMuted)
+        let next = MasterLevel(name: systemAudio.outputName, level: level, muted: systemAudio.isMuted,
+                               symbol: systemAudio.outputSymbol)
         if next != master { master = next }
     }
 
     private func playbackChanged() {
         if ducking { refreshDuck() }
-        if needsActiveTaps { syncTaps() } else { publishRows() }
+        if needsActiveTaps || wantsMeters { syncTaps() } else { publishRows() }
     }
 
-    /// Holds other playing apps at a quarter while a call, Meet, or the chosen app is playing.
+    private func recordingChanged() {
+        guard ducking else { return }
+        let before = duckGain
+        refreshDuck()
+        if duckGain != before { syncTaps() }
+    }
+
+    /// While a call app uses the microphone, every other playing app goes down to `duckLevel`
+    /// of its own level. The chosen app also counts while it plays.
     private func refreshDuck() {
-        guard ducking, !isPreview else {
+        guard ducking, !isPreview, capture == .authorized else {
             duckGain = [:]
             return
         }
         let groups = activity.mixerProcessGroups()
-        var calls = Set(groups.map(\.app.bundleID).filter { Self.callBundles.contains($0) || $0 == duckAppID })
+        var calls = Set(activity.recording.map(\.bundleID).filter { id in
+            Self.callBundles.contains(id) || id == duckAppID || (duckBrowserMeet && Self.browserBundles.contains(id))
+        })
+        // FaceTime's audio also shows up as an ordinary player.
+        for group in groups where group.app.bundleID == "com.apple.FaceTime" || group.app.bundleID == duckAppID {
+            calls.insert(group.app.bundleID)
+        }
         calls.formUnion(additionalCallBundles())
         guard !calls.isEmpty else {
             duckGain = [:]
             return
         }
+        let depth = Float(duckLevel)
         var next: [String: Float] = [:]
         for group in groups where !calls.contains(group.app.bundleID) {
             let id = group.app.bundleID
             let level = saved[id]
             let base: Float = level?.muted == true ? 0 : Float(level?.level ?? 100) / 100
-            next[id] = min(base, 0.25)
+            next[id] = base * depth
         }
         duckGain = next
     }
@@ -699,54 +866,23 @@ final class AppVolumeMixer: ObservableObject {
             if lhs.playing != rhs.playing { return lhs.playing && !rhs.playing }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
-        for id in next.filter(\.playing).map(\.id).reversed() { rememberRecent(id) }
-        rows = next
-        showSavedHint = isVisible && !engaged && rows.contains { $0.level != 100 || $0.muted }
+        if next != rows { rows = next }
+        let hint = isVisible && needsApplyHint
+        if hint != showSavedHint { showSavedHint = hint }
         assignDefaultCrossPairIfNeeded()
     }
 
-    /// Strips for Home: apps Core Audio says are playing, same as the green dot on the Mixer tab.
-    /// When that list is empty, the Now Playing app and recently active apps fill in.
-    func homeStrips(nowPlayingBundle: String?, nowPlayingName: String?, isPlaying: Bool) -> [AppVolumeRow] {
-        let detected = rows.filter(\.playing)
-        if !detected.isEmpty { return Array(detected.prefix(4)) }
-        var fallback: [AppVolumeRow] = []
-        if isPlaying, let id = nowPlayingBundle {
-            fallback.append(strip(for: id, name: nowPlayingName, forcePlaying: true))
-        }
-        for id in recentPlaying where fallback.count < 4 && !fallback.contains(where: { $0.id == id }) {
-            fallback.append(strip(for: id, name: nil, forcePlaying: true))
-        }
-        return fallback
-    }
-
-    private func strip(for id: String, name: String?, forcePlaying: Bool) -> AppVolumeRow {
-        if var row = rows.first(where: { $0.id == id }) {
-            if forcePlaying { row.playing = true }
-            return row
-        }
-        let level = saved[id]
-        let resolved = name
-            ?? NSRunningApplication.runningApplications(withBundleIdentifier: id).first?.localizedName
-            ?? id
-        return AppVolumeRow(id: id, name: resolved, level: level?.level ?? 100,
-                             muted: level?.muted ?? false, playing: forcePlaying)
-    }
-
-    private func rememberRecent(_ id: String) {
-        recentPlaying.removeAll { $0 == id }
-        recentPlaying.insert(id, at: 0)
-        if recentPlaying.count > 6 { recentPlaying = Array(recentPlaying.prefix(6)) }
-    }
+    // MARK: Outputs
 
     func outputDevices() -> [AudioDeviceChoice] { outputChoices }
 
     /// The system default output, for the settings menu.
-    func currentOutputUID() -> String { systemAudio.currentOutputUID() }
+    func currentOutputUID() -> String { isPreview ? "" : systemAudio.currentOutputUID() }
 
-    /// Fills the device menu. Settings can open before the mixer does.
+    /// Fills the device menu. Settings can open before the panel does.
     func refreshDevices() {
         refreshOutputChoices()
+        refreshMaster()
     }
 
     /// Reads the Core Audio device list once per output change, not on every redraw.
@@ -777,6 +913,9 @@ final class AppVolumeMixer: ObservableObject {
         updateHooks()
         syncTaps()
     }
+
+    /// The device an app is routed to, or nil for the system default.
+    func route(for bundleID: String) -> String? { routes[bundleID] }
 
     /// Switches the system default output. This is the master strip, not a process tap.
     func setSystemOutput(uid: String) {
@@ -812,7 +951,7 @@ final class AppVolumeMixer: ObservableObject {
               let decoded = try? JSONDecoder().decode([String: SavedLevel].self, from: data) else { return [:] }
         var result: [String: SavedLevel] = [:]
         for (id, level) in decoded {
-            let clamped = min(100, max(0, level.level))
+            let clamped = min(150, max(0, level.level))
             if clamped != 100 || level.muted { result[id] = SavedLevel(level: clamped, muted: level.muted) }
         }
         return result
@@ -874,6 +1013,8 @@ private final class MixerEngine: @unchecked Sendable {
         var cross: [String: Float]
         var rebuild: Bool
         var tones: [String: DeckTone]
+        /// Meter-only taps for playing apps that have no volume tap.
+        var meters: Bool
     }
 
     struct Problem: Sendable {
@@ -887,6 +1028,10 @@ private final class MixerEngine: @unchecked Sendable {
         var problems: [Problem] = []
         /// This pass was a full sync, so the main actor can start the next one.
         var completesSync = false
+        /// A tap started, so System Audio Recording is allowed.
+        var started = false
+        /// A meter tap was refused for permission. Meters stay off until the next rebuild.
+        var meterPermissionDenied = false
     }
 
     private let queue = DispatchQueue(label: "com.local.notchdj.mixer-engine")
@@ -894,6 +1039,9 @@ private final class MixerEngine: @unchecked Sendable {
     /// Touched only on `queue`.
     private var taps: [String: ProcessVolumeTap] = [:]
     private var suppressed: Set<String> = []
+    /// Apps whose meter tap failed. They show no meter, and nothing is reported.
+    private var meterSuppressed: Set<String> = []
+    private var metersBlocked = false
     private var healthScheduled = false
     private var metering = false
     private var meterScheduled = false
@@ -935,7 +1083,16 @@ private final class MixerEngine: @unchecked Sendable {
         }
     }
 
-    /// Reads atomic peaks from existing taps. No Core Audio calls. Stops when DJ is hidden.
+    func unsuppressAll() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.suppressed.removeAll()
+            self.meterSuppressed.removeAll()
+            self.metersBlocked = false
+        }
+    }
+
+    /// Reads atomic peaks from existing taps. No Core Audio calls. Stops when the panel closes.
     func setMetering(_ on: Bool) {
         queue.async { [weak self] in
             guard let self else { return }
@@ -954,7 +1111,7 @@ private final class MixerEngine: @unchecked Sendable {
             var levels: [String: TapMeter] = [:]
             for (id, tap) in self.taps {
                 let snap = tap.meterSnapshot()
-                levels[id] = TapMeter(peak: snap.peak, rms: sqrt(max(0, snap.meanSquare)))
+                levels[id] = TapMeter(left: snap.left, right: snap.right, rms: sqrt(max(0, snap.meanSquare)))
             }
             self.hop.sendMeters(levels)
             self.scheduleMeter()
@@ -978,6 +1135,8 @@ private final class MixerEngine: @unchecked Sendable {
     private func apply(_ job: Job) -> Outcome {
         if job.rebuild {
             suppressed.removeAll()
+            meterSuppressed.removeAll()
+            metersBlocked = false
             stopAllOnQueue()
         }
         defer { applyTones(job) }
@@ -985,48 +1144,77 @@ private final class MixerEngine: @unchecked Sendable {
         var playing: [String: PlayingProcessGroup] = [:]
         for group in job.groups { playing[group.app.bundleID] = group }
         for id in Array(taps.keys) {
-            let keep = playing[id].map {
-                wantsTap(id: id, level: job.saved[id], solo: job.solo, route: job.routes[id], duck: job.duck[id], cross: job.cross[id], filters: job.tones[id]?.isFlat == false)
-                    && !suppressed.contains(id)
-                    && taps[id]?.matches($0.processObjects, preferredUID: job.routes[id]) == true
-            } ?? false
+            guard let tap = taps[id] else { continue }
+            var keep = false
+            if let group = playing[id] {
+                let volume = wantsVolume(id, job)
+                if tap.meterOnly {
+                    keep = !volume && job.meters && !job.permissionDenied && !metersBlocked
+                        && !meterSuppressed.contains(id) && tap.matches(group.processObjects, preferredUID: nil)
+                } else {
+                    keep = volume && tap.matches(group.processObjects, preferredUID: job.routes[id])
+                }
+            }
             if !keep { drop(id) }
         }
         guard !job.permissionDenied else { return outcome }
         for group in job.groups {
             let id = group.app.bundleID
-            guard wantsTap(id: id, level: job.saved[id], solo: job.solo, route: job.routes[id], duck: job.duck[id], cross: job.cross[id], filters: job.tones[id]?.isFlat == false),
-                  !suppressed.contains(id) else { continue }
-            let gain = gainValue(id: id, level: job.saved[id], solo: job.solo, duck: job.duck[id], cross: job.cross[id])
-            if let existing = taps[id], existing.matches(group.processObjects, preferredUID: job.routes[id]) {
-                if existing.hasFault {
-                    outcome.problems.append(fail(id, permission: false, detail: "The audio callback failed."))
-                } else {
-                    existing.setGain(gain)
+            if wantsVolume(id, job) {
+                let gain = gainValue(id: id, level: job.saved[id], solo: job.solo, duck: job.duck[id], cross: job.cross[id])
+                if let existing = taps[id], !existing.meterOnly,
+                   existing.matches(group.processObjects, preferredUID: job.routes[id]) {
+                    if existing.hasFault {
+                        outcome.problems.append(fail(id, permission: false, detail: String(localized: "The audio callback failed.")))
+                    } else {
+                        existing.setGain(gain)
+                    }
+                    continue
+                }
+                drop(id)
+                let detail = "\(group.app.name) [\(group.processObjects.map(String.init).joined(separator: ","))]"
+                mixerLog.info("starting \(detail, privacy: .public) gain=\(gain, privacy: .public)")
+                switch ProcessVolumeTap.start(processObjects: group.processObjects, gain: gain, label: group.app.name, outputUID: job.routes[id]) {
+                case .success(let tap):
+                    taps[id] = tap
+                    outcome.started = true
+                    scheduleHealthCheck()
+                case .failure(let error):
+                    if case .deviceMissing = error {
+                        outcome.deviceGone.append(id)
+                        continue
+                    }
+                    outcome.problems.append(fail(id, permission: error.isPermission, detail: error.summary))
+                    if error.isPermission { return outcome }
                 }
                 continue
             }
-            drop(id)
-            let detail = "\(group.app.name) [\(group.processObjects.map(String.init).joined(separator: ","))]"
-            mixerLog.info("starting \(detail, privacy: .public) gain=\(gain, privacy: .public)")
-            switch ProcessVolumeTap.start(processObjects: group.processObjects, gain: gain, label: group.app.name, outputUID: job.routes[id]) {
+            guard job.meters, !metersBlocked, !meterSuppressed.contains(id), taps[id] == nil else { continue }
+            switch ProcessVolumeTap.start(processObjects: group.processObjects, gain: 1, label: group.app.name, meterOnly: true) {
             case .success(let tap):
                 taps[id] = tap
+                outcome.started = true
                 scheduleHealthCheck()
             case .failure(let error):
-                if case .deviceMissing = error {
-                    outcome.deviceGone.append(id)
-                    continue
+                meterSuppressed.insert(id)
+                if error.isPermission {
+                    metersBlocked = true
+                    outcome.meterPermissionDenied = true
+                    return outcome
                 }
-                outcome.problems.append(fail(id, permission: error.isPermission, detail: error.summary))
-                if error.isPermission { return outcome }
             }
         }
         return outcome
     }
 
+    private func wantsVolume(_ id: String, _ job: Job) -> Bool {
+        guard !suppressed.contains(id) else { return false }
+        return wantsTap(id: id, level: job.saved[id], solo: job.solo, route: job.routes[id], duck: job.duck[id],
+                        cross: job.cross[id], filters: job.tones[id]?.isFlat == false)
+    }
+
     private func applyTones(_ job: Job) {
-        for (id, tap) in taps {
+        for (id, tap) in taps where !tap.meterOnly {
             tap.setDeckTone(job.tones[id] ?? .center)
         }
     }
@@ -1035,7 +1223,7 @@ private final class MixerEngine: @unchecked Sendable {
         let tones = tones
         queue.async { [weak self] in
             guard let self else { return }
-            for (id, tap) in self.taps {
+            for (id, tap) in self.taps where !tap.meterOnly {
                 tap.setDeckTone(tones[id] ?? .center)
             }
         }
@@ -1115,11 +1303,17 @@ private final class MixerEngine: @unchecked Sendable {
         for (id, tap) in Array(taps) {
             guard now.timeIntervalSince(tap.createdAt) >= 0.8, !tap.healthChecked else { continue }
             tap.healthChecked = true
-            if tap.hasFault || !tap.didRender {
-                mixerLog.error("tap unhealthy \(tap.label, privacy: .public) fault=\(tap.hasFault, privacy: .public) rendered=\(tap.didRender, privacy: .public)")
-                let detail = tap.hasFault ? "The audio format didn't match." : "No audio arrived from the tap."
-                outcome.problems.append(fail(id, permission: false, detail: detail))
+            guard tap.hasFault || !tap.didRender else { continue }
+            mixerLog.error("tap unhealthy \(tap.label, privacy: .public) meterOnly=\(tap.meterOnly, privacy: .public) fault=\(tap.hasFault, privacy: .public) rendered=\(tap.didRender, privacy: .public)")
+            if tap.meterOnly {
+                drop(id)
+                meterSuppressed.insert(id)
+                continue
             }
+            let detail = tap.hasFault
+                ? String(localized: "The audio format didn't match.")
+                : String(localized: "No audio arrived from the tap.")
+            outcome.problems.append(fail(id, permission: false, detail: detail))
         }
         return outcome
     }

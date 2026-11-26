@@ -302,3 +302,30 @@ private func biq(_ x: Float, _ c: BiquadCoeff, _ s: inout BiquadState) -> Float 
 private func flush(_ value: Float) -> Float {
     value.magnitude < 1e-15 ? 0 : value
 }
+
+/// What the FILTER knob does at a position.
+enum ToneFilterMode: Equatable {
+    case off
+    case lowPass(Float)
+    case highPass(Float)
+}
+
+/// The same mappings as the render path, for value bubbles and VoiceOver.
+extension ToneMath {
+    static func bandGain(_ knob: Double) -> Float { bandDB(knob) }
+
+    static func isKill(_ knob: Double) -> Bool { knob <= 0.02 }
+
+    static func makeupDB(_ knob: Double) -> Float { (Float(knob) - 0.5) * 24 }
+
+    static func filterMode(_ knob: Double) -> ToneFilterMode {
+        let delta = knob - 0.5
+        if abs(delta) < 0.02 { return .off }
+        if delta < 0 {
+            let t = Float(((-delta) - 0.02) / 0.48)
+            return .lowPass(18_000 * pow(200 / 18_000, min(1, max(0, t))))
+        }
+        let t = Float((delta - 0.02) / 0.48)
+        return .highPass(200 * pow(18_000 / 200, min(1, max(0, t))))
+    }
+}

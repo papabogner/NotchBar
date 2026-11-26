@@ -8,12 +8,9 @@ import AudioToolbox
 /// reports when the output switches to another device, such as headphones connecting.
 @MainActor
 final class SystemAudio {
-    var onChange: ((Float, Bool) -> Void)?
-    /// Called with the previous and the new output device.
-    var onOutputChange: ((AudioOutput?, AudioOutput) -> Void)?
-    /// More listeners for the same change. Empty unless the volume mixer is actually adjusting apps.
+    /// Called with the previous and the new output device. Empty unless something is listening.
     private var outputHandlers: [UUID: (AudioOutput?, AudioOutput) -> Void] = [:]
-    /// Volume listeners besides the HUD. Empty unless the mixer strip is on screen.
+    /// Volume listeners. Empty unless a master control is on screen.
     private var volumeHandlers: [UUID: (Float, Bool) -> Void] = [:]
     private var device = AudioDeviceID(0)
     private var listening: AudioDeviceID?
@@ -57,12 +54,9 @@ final class SystemAudio {
         let current = AudioOutput(device: id)
         output = current
         // The first reading happens at launch, which isn't a change.
-        if let previous, previous.id != current.id {
-            onOutputChange?(previous, current)
-            if !outputHandlers.isEmpty {
-                let handlers = outputHandlers
-                handlers.values.forEach { $0(previous, current) }
-            }
+        if let previous, previous.id != current.id, !outputHandlers.isEmpty {
+            let handlers = outputHandlers
+            handlers.values.forEach { $0(previous, current) }
         }
     }
 
@@ -87,10 +81,11 @@ final class SystemAudio {
     }
 
     /// Name of the current default output. "System" until the first device is known.
-    var outputName: String { output?.name ?? "System" }
+    var outputName: String { output?.name ?? String(localized: "System") }
+    /// SF Symbol for the current default output.
+    var outputSymbol: String { output?.symbol ?? "speaker.wave.2.fill" }
 
     private func emit() {
-        onChange?(volume, isMuted)
         guard !volumeHandlers.isEmpty else { return }
         let handlers = volumeHandlers
         let value = volume
@@ -143,7 +138,10 @@ final class SystemAudio {
         guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids) == noErr else { return [] }
         return ids.compactMap { id in
             guard Self.hasOutputStreams(id), let uid = Self.deviceUID(id), !uid.isEmpty else { return nil }
-            return AudioDeviceChoice(uid: uid, name: AudioOutput(device: id).name, objectID: id)
+            let device = AudioOutput(device: id)
+            // Notch DJ's own private aggregates are visible to this process. They are not outputs.
+            guard !TapAggregate.isOwn(uid: uid, name: device.name) else { return nil }
+            return AudioDeviceChoice(uid: uid, name: device.name, objectID: id, symbol: device.symbol)
         }
     }
 
@@ -182,6 +180,7 @@ struct AudioDeviceChoice: Identifiable, Equatable {
     var uid: String
     var name: String
     var objectID: AudioDeviceID
+    var symbol: String = "speaker.wave.2.fill"
     var id: String { uid }
 }
 

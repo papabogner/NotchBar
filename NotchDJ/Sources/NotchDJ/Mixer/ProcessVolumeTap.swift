@@ -24,11 +24,12 @@ enum TapStartError: Error, Equatable {
     var summary: String {
         switch self {
         case .permissionDenied(let status):
-            return "System audio recording is off (\(Self.code(status))). Allow Notch DJ in Privacy & Security > System Audio Recording, then move the slider again. Rebuilding asks again."
+            let code = Self.code(status)
+            return String(localized: "System Audio Recording is off for Notch DJ (\(code)). Turn it on in Privacy & Security, then try again.")
         case .failed(let status, let stage):
             return "\(stage) (\(Self.code(status)))."
         case .deviceMissing:
-            return "That output device is no longer available."
+            return String(localized: "That output device is no longer available.")
         }
     }
 
@@ -49,6 +50,9 @@ enum TapStartError: Error, Equatable {
 /// The tap uses `mutedWhenTapped`, so the app's own stream goes silent only while this tap is
 /// actually being read. If anything here fails, or the callback never runs, the tap is destroyed
 /// and the app is audible again at full volume. At 100% the caller does not create a tap at all.
+///
+/// A meter-only tap is `unmuted` and writes silence: the app keeps playing on its own stream,
+/// and the callback only measures it. Those exist only while the panel is open.
 /// Created, started, and destroyed only on `MixerEngine`'s serial queue.
 /// `setGain`, `didRender`, and `hasFault` are atomic, so the render callback can share them.
 @available(macOS 14.4, *)
@@ -57,6 +61,7 @@ final class ProcessVolumeTap: @unchecked Sendable {
     /// Nil plays through the system default. A saved UID plays through that device.
     let preferredUID: String?
     let label: String
+    let meterOnly: Bool
     let createdAt = Date()
     /// Set on the engine queue by the health check. The render callback never reads it.
     var healthChecked = false
@@ -71,12 +76,14 @@ final class ProcessVolumeTap: @unchecked Sendable {
     private var toneState: UnsafeMutablePointer<ToneRuntime>?
     let sampleRate: Float
 
-    private init(processObjects: [AudioObjectID], preferredUID: String?, label: String, context: UnsafeMutablePointer<TapContext>,
+    private init(processObjects: [AudioObjectID], preferredUID: String?, label: String, meterOnly: Bool,
+                 context: UnsafeMutablePointer<TapContext>,
                  aggregate: AudioObjectID, tap: AudioObjectID, proc: AudioDeviceIOProcID?,
                  toneBox: UnsafeMutablePointer<ToneMailbox>, toneState: UnsafeMutablePointer<ToneRuntime>, sampleRate: Float) {
         self.processObjects = processObjects
         self.preferredUID = preferredUID
         self.label = label
+        self.meterOnly = meterOnly
         self.context = context
         self.aggregate = aggregate
         self.tap = tap
@@ -102,15 +109,15 @@ final class ProcessVolumeTap: @unchecked Sendable {
     func setGain(_ gain: Float) {
         guard let context else { return }
         let clamped = min(1.5, max(0, gain))
+        if abs(clamped - loggedGain) >= 0.01 {
+            loggedGain = clamped
+            mixerLog.info("gain \(self.label, privacy: .public) \(clamped, privacy: .public)")
+        }
         let new = Int32(bitPattern: clamped.bitPattern)
         let ptr = int32Field(context, targetOffset)
         while true {
             let old = OSAtomicAdd32Barrier(0, ptr)
             if old == new || OSAtomicCompareAndSwap32Barrier(old, new, ptr) { return }
-        }
-        if abs(clamped - loggedGain) >= 0.01 {
-            loggedGain = clamped
-            mixerLog.info("gain \(self.label, privacy: .public) \(clamped, privacy: .public)")
         }
     }
 
@@ -124,12 +131,13 @@ final class ProcessVolumeTap: @unchecked Sendable {
         return OSAtomicAdd32Barrier(0, int32Field(context, faultOffset)) != 0
     }
 
-    /// Latest buffer peak and mean square, written by the render callback with atomics.
-    func meterSnapshot() -> (peak: Float, meanSquare: Float) {
-        guard let context else { return (0, 0) }
-        let peak = Float(bitPattern: UInt32(bitPattern: OSAtomicAdd32Barrier(0, int32Field(context, peakOffset))))
+    /// Latest buffer peaks per side and mean square, written by the render callback with atomics.
+    func meterSnapshot() -> (left: Float, right: Float, meanSquare: Float) {
+        guard let context else { return (0, 0, 0) }
+        let left = Float(bitPattern: UInt32(bitPattern: OSAtomicAdd32Barrier(0, int32Field(context, peakOffset))))
+        let right = Float(bitPattern: UInt32(bitPattern: OSAtomicAdd32Barrier(0, int32Field(context, peakRightOffset))))
         let mean = Float(bitPattern: UInt32(bitPattern: OSAtomicAdd32Barrier(0, int32Field(context, rmsOffset))))
-        return (peak, mean)
+        return (left, right, mean)
     }
 
     /// Stops reading the tap first, so `mutedWhenTapped` releases the app, then destroys it.
@@ -157,7 +165,8 @@ final class ProcessVolumeTap: @unchecked Sendable {
     }
 
     /// Installs the tap and starts reading it. On any failure nothing is left running.
-    static func start(processObjects: [AudioObjectID], gain: Float, label: String, outputUID: String? = nil) -> Result<ProcessVolumeTap, TapStartError> {
+    static func start(processObjects: [AudioObjectID], gain: Float, label: String, outputUID: String? = nil,
+                      meterOnly: Bool = false) -> Result<ProcessVolumeTap, TapStartError> {
         let objects = processObjects.sorted()
         guard !objects.isEmpty else {
             let error = TapStartError.failed(0, "No processes")
@@ -185,7 +194,7 @@ final class ProcessVolumeTap: @unchecked Sendable {
         let description = CATapDescription(stereoMixdownOfProcesses: objects)
         description.name = "Notch DJ"
         description.isPrivate = true
-        description.muteBehavior = .mutedWhenTapped
+        description.muteBehavior = meterOnly ? .unmuted : .mutedWhenTapped
 
         var tapID = AudioObjectID(kAudioObjectUnknown)
         let created = AudioHardwareCreateProcessTap(description, &tapID)
@@ -282,6 +291,8 @@ final class ProcessVolumeTap: @unchecked Sendable {
             tapChannelCount: Int32(tapChannels),
             peakBits: 0,
             rmsBits: 0,
+            peakRightBits: 0,
+            mode: meterOnly ? 1 : 0,
             toneBoxBits: UInt64(UInt(bitPattern: box)),
             toneStateBits: UInt64(UInt(bitPattern: state))))
         resources.context = context
@@ -305,9 +316,11 @@ final class ProcessVolumeTap: @unchecked Sendable {
         }
 
         keepTone = true
-        let tap = ProcessVolumeTap(processObjects: objects, preferredUID: outputUID, label: label, context: context, aggregate: aggregate, tap: tapID, proc: proc, toneBox: box, toneState: state, sampleRate: rate)
+        let tap = ProcessVolumeTap(processObjects: objects, preferredUID: outputUID, label: label, meterOnly: meterOnly,
+                                   context: context, aggregate: aggregate, tap: tapID, proc: proc,
+                                   toneBox: box, toneState: state, sampleRate: rate)
         resources.abandon()
-        mixerLog.info("tap started \(label, privacy: .public) gain=\(clamped, privacy: .public) output=\(output.uid, privacy: .public) objects=\(objects.map(String.init).joined(separator: ","), privacy: .public) inputChannels=\(totalInput, privacy: .public) tapOffset=\(tapOffset, privacy: .public) suppressedInput=\(suppressedInput, privacy: .public) drift=\(drift, privacy: .public)")
+        mixerLog.info("tap started \(label, privacy: .public) meterOnly=\(meterOnly, privacy: .public) gain=\(clamped, privacy: .public) output=\(output.uid, privacy: .public) objects=\(objects.map(String.init).joined(separator: ","), privacy: .public) inputChannels=\(totalInput, privacy: .public) tapOffset=\(tapOffset, privacy: .public) suppressedInput=\(suppressedInput, privacy: .public) drift=\(drift, privacy: .public)")
         return .success(tap)
     }
 }
@@ -329,9 +342,13 @@ private struct TapContext {
     /// First input channel that belongs to the process tap. Hardware inputs, if any, come before it.
     var tapChannelOffset: Int32
     var tapChannelCount: Int32
-    /// Peak and mean square of the last buffer. Written only through OSAtomic.
+    /// Left peak and mean square of the last buffer. Written only through OSAtomic.
     var peakBits: Int32
     var rmsBits: Int32
+    /// Right peak of the last buffer. Written only through OSAtomic.
+    var peakRightBits: Int32
+    /// 0 plays the tap back at the gain. 1 only measures it and writes silence.
+    var mode: Int32
     /// Fixed after the tap starts. The render callback only reads them.
     var toneBoxBits: UInt64
     var toneStateBits: UInt64
@@ -350,8 +367,10 @@ private let tapChannelOffsetOffset = MemoryLayout<TapContext>.offset(of: \TapCon
 private let tapChannelCountOffset = MemoryLayout<TapContext>.offset(of: \TapContext.tapChannelCount) ?? 40
 private let peakOffset = MemoryLayout<TapContext>.offset(of: \TapContext.peakBits) ?? 44
 private let rmsOffset = MemoryLayout<TapContext>.offset(of: \TapContext.rmsBits) ?? 48
-private let toneBoxOffset = MemoryLayout<TapContext>.offset(of: \TapContext.toneBoxBits) ?? 56
-private let toneStateOffset = MemoryLayout<TapContext>.offset(of: \TapContext.toneStateBits) ?? 64
+private let peakRightOffset = MemoryLayout<TapContext>.offset(of: \TapContext.peakRightBits) ?? 52
+private let modeOffset = MemoryLayout<TapContext>.offset(of: \TapContext.mode) ?? 56
+private let toneBoxOffset = MemoryLayout<TapContext>.offset(of: \TapContext.toneBoxBits) ?? 64
+private let toneStateOffset = MemoryLayout<TapContext>.offset(of: \TapContext.toneStateBits) ?? 72
 
 /// Owns half-built Core Audio objects so a failed start cannot leave a tap muting an app.
 @available(macOS 14.4, *)
@@ -409,6 +428,7 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
     // buffers alias, or the silence pass would wipe the input before we read it.
     let aliases = inList.count > 0 && outList.count > 0 && inList[0].mData == outList[0].mData
     if !aliases { silence(outList) }
+    let meterMode = int32Field(context, modeOffset).pointee == 1
 
     let plannedTapOffset = Int(int32Field(context, tapChannelOffsetOffset).pointee)
     let tapChannels = max(1, Int(int32Field(context, tapChannelCountOffset).pointee))
@@ -427,6 +447,14 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
         sourceOffset = min(max(0, plannedTapOffset), inList.count - tapChannels)
     }
 
+    if meterMode {
+        // The app is not muted and plays on its own stream. Measure, and play nothing.
+        let measured = measureTap(context, inList, interleaved: inInterleaved, stride: sourceStride,
+                                  offset: sourceOffset, tapChannels: tapChannels)
+        if aliases { silence(outList) }
+        return measured
+    }
+
     if sourceStride <= 0 || outChannels <= 0 || inList.count == 0 || outList.count == 0 { return false }
     if (outInterleaved && outList.count < 1) || (!outInterleaved && outList.count < min(outChannels, tapChannels)) {
         _ = OSAtomicCompareAndSwap32Barrier(0, 1, int32Field(context, faultOffset))
@@ -443,7 +471,8 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
     let step = floatField(context, stepOffset).pointee
     let frames = outFrames
     var frame = 0
-    var peak: Float = 0
+    var peakLeft: Float = 0
+    var peakRight: Float = 0
     var sum: Float = 0
     let tone = toneWork(context)
     var toneCursor = tone
@@ -483,7 +512,11 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
                 return false
             }
             let magnitude = sample < 0 ? -sample : sample
-            if magnitude > peak { peak = magnitude }
+            if channel == 0 {
+                if magnitude > peakLeft { peakLeft = magnitude }
+            } else if channel == 1 {
+                if magnitude > peakRight { peakRight = magnitude }
+            }
             sum += sample * sample
             channel += 1
         }
@@ -491,11 +524,52 @@ private func renderTap(_ context: UnsafeMutablePointer<TapContext>,
     }
     gainSlot.pointee = gain
     if toneCursor.live, let state = toneState(context) { toneEnd(toneCursor, state) }
+    if outChannels < 2 { peakRight = peakLeft }
     // Strided aggregate buffers are not one contiguous channel, so this stays in the loop
     // instead of calling vDSP. No allocation, and the words are stored atomically.
     let counted = Float(max(frames * min(outChannels, tapChannels), 1))
-    storeAtomicFloat(peak, context, peakOffset)
+    storeAtomicFloat(peakLeft, context, peakOffset)
+    storeAtomicFloat(peakRight, context, peakRightOffset)
     storeAtomicFloat(sum / counted, context, rmsOffset)
+    return true
+}
+
+/// Peaks and mean square of the tap's own channels, read straight from the input.
+private func measureTap(_ context: UnsafeMutablePointer<TapContext>, _ list: UnsafeMutableAudioBufferListPointer,
+                        interleaved: Bool, stride: Int, offset: Int, tapChannels: Int) -> Bool {
+    if stride <= 0 || list.count == 0 { return false }
+    let first = interleaved ? 0 : offset
+    if first < 0 || first >= list.count { return false }
+    let frames = frameCount(list[first], channelsInBuffer: interleaved ? stride : 1)
+    if frames <= 0 { return false }
+    let channels = min(max(tapChannels, 1), 2)
+    var left: Float = 0
+    var right: Float = 0
+    var sum: Float = 0
+    var counted = 0
+    var frame = 0
+    while frame < frames {
+        var channel = 0
+        while channel < channels {
+            let source = offset + channel
+            guard source < stride,
+                  let sample = readSample(list, interleaved: interleaved, channels: stride, frame: frame, channel: source) else { break }
+            let magnitude = sample < 0 ? -sample : sample
+            if channel == 0 {
+                if magnitude > left { left = magnitude }
+            } else if magnitude > right {
+                right = magnitude
+            }
+            sum += sample * sample
+            counted += 1
+            channel += 1
+        }
+        frame += 1
+    }
+    if channels < 2 { right = left }
+    storeAtomicFloat(left, context, peakOffset)
+    storeAtomicFloat(right, context, peakRightOffset)
+    storeAtomicFloat(sum / Float(max(counted, 1)), context, rmsOffset)
     return true
 }
 
@@ -678,6 +752,17 @@ private func readTapUID(_ tap: AudioObjectID) -> String? {
     return value?.takeRetainedValue() as String?
 }
 
+/// How Notch DJ's own private aggregates are named. They are visible to this process, so the
+/// device menus leave them out.
+enum TapAggregate {
+    static let name = "Notch DJ Mixer"
+    static let uidPrefix = "com.local.notchdj.aggregate."
+
+    static func isOwn(uid: String, name: String) -> Bool {
+        uid.hasPrefix(uidPrefix) || name == Self.name
+    }
+}
+
 /// Private aggregate: the tap is the input, the current default output is what we play into.
 /// `TapAutoStart` starts the tap when the device's IO starts, which is the read `mutedWhenTapped` waits for.
 @available(macOS 14.4, *)
@@ -691,8 +776,8 @@ private func aggregateDictionary(outputUID: String, tapUID: String, drift: Bool,
         subdevice[kAudioSubDeviceInputChannelsKey] = [] as [NSNumber]
     }
     return [
-        kAudioAggregateDeviceNameKey: "Notch DJ Mixer",
-        kAudioAggregateDeviceUIDKey: UUID().uuidString,
+        kAudioAggregateDeviceNameKey: TapAggregate.name,
+        kAudioAggregateDeviceUIDKey: TapAggregate.uidPrefix + UUID().uuidString,
         kAudioAggregateDeviceMainSubDeviceKey: outputUID,
         kAudioAggregateDeviceClockDeviceKey: outputUID,
         kAudioAggregateDeviceIsPrivateKey: true,
