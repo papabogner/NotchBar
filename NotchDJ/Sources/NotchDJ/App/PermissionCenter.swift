@@ -59,6 +59,7 @@ final class PermissionCenter: ObservableObject {
     private var checking = false
     private var lastCheck: TimeInterval = 0
     private var pollTimer: Timer?
+    private var pollers = 0
     private var accessibilityObserver: NSObjectProtocol?
     private let isPreview: Bool
 
@@ -131,9 +132,12 @@ final class PermissionCenter: ObservableObject {
         set(granted ? .authorized : .denied)
     }
 
-    /// Checks every second while onboarding or Settings shows the permission row.
+    /// Checks every second while onboarding or Settings shows a permission row. Calls nest:
+    /// polling stops after the last matching `stopPolling()`.
     func startPolling() {
-        guard !isPreview, pollTimer == nil else { return }
+        guard !isPreview else { return }
+        pollers += 1
+        guard pollTimer == nil else { return }
         refresh(force: true)
         let center = self
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
@@ -142,6 +146,9 @@ final class PermissionCenter: ObservableObject {
     }
 
     func stopPolling() {
+        guard !isPreview else { return }
+        pollers = max(0, pollers - 1)
+        guard pollers == 0 else { return }
         pollTimer?.invalidate()
         pollTimer = nil
     }

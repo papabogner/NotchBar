@@ -3,7 +3,8 @@
 import Carbon
 import Foundation
 
-/// Global shortcuts. Off until the menu turns them on. Carbon hot keys, no Accessibility prompt.
+/// Global shortcuts ⌃⌥N and ⌃⌥M. On by default; Settings and onboarding can turn them off.
+/// Carbon hot keys, so there is no Accessibility prompt.
 @MainActor
 final class HotkeyController: ObservableObject {
     static weak var current: HotkeyController?
