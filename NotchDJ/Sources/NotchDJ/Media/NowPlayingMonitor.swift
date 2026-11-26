@@ -62,11 +62,6 @@ final class NowPlayingMonitor: ObservableObject {
 
     // MARK: Transport
 
-    var canControl: Bool {
-        guard let entry else { return false }
-        return entry.source.isScriptable || mediaKeysAllowed()
-    }
-
     func togglePlay() { send(.toggle) }
     func next() { send(.next) }
     func previous() { send(.previous) }

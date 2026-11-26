@@ -33,9 +33,6 @@ struct MediaSource: Equatable, Hashable, Sendable {
     }
 
     var isScriptable: Bool { kind == .music || kind == .spotify }
-    var isBrowser: Bool { kind == .chromium || kind == .safari }
-    /// Controlled with the system media keys, which needs Accessibility access.
-    var usesMediaKeys: Bool { !isScriptable }
     /// Browsers forward previous and next to the page. Other apps usually ignore them.
     var canSkip: Bool { kind != .generic }
 

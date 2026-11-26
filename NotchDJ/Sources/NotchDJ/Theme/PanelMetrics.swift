@@ -31,8 +31,6 @@ struct PanelMetrics: Equatable, Sendable {
     var textScale: CGFloat
 
     var gap: CGFloat { 8 }
-    var contentHeight: CGFloat { height - header - padding * 2 }
-    var contentWidth: CGFloat { width - padding * 2 }
 
     static func make(_ size: PanelSize, screen: CGSize = CGSize(width: 1512, height: 982),
                      notchHeight: CGFloat = 32) -> PanelMetrics {

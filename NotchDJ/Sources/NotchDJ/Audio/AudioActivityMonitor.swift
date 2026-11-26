@@ -83,8 +83,6 @@ final class AudioActivityMonitor {
     private static var processRunningAddress = address(kAudioProcessPropertyIsRunning)
     private static var deviceListAddress = address(kAudioHardwarePropertyDevices)
     private static var deviceRunningAddress = address(kAudioDevicePropertyDeviceIsRunningSomewhere)
-    private static var inputStreamsAddress = AudioObjectPropertyAddress(
-        mSelector: kAudioDevicePropertyStreams, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
 
     /// Something started or stopped: a process, a device, or the list of processes.
     private lazy var activityChanged: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
@@ -131,10 +129,6 @@ final class AudioActivityMonitor {
     private func scheduleBothEvaluations() {
         scheduleEvaluation()
         scheduleInputEvaluation()
-    }
-
-    private var microphoneOn: Bool {
-        watchedDevices.contains { hasInput($0) && isRunning($0, &Self.deviceRunningAddress) }
     }
 
     /// Sound has to last a moment before it counts, which ignores alert blips, and the same
@@ -341,11 +335,6 @@ final class AudioActivityMonitor {
         var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
         guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids) == noErr else { return [] }
         return ids
-    }
-
-    private func hasInput(_ device: AudioObjectID) -> Bool {
-        var size: UInt32 = 0
-        return AudioObjectGetPropertyDataSize(device, &Self.inputStreamsAddress, 0, nil, &size) == noErr && size > 0
     }
 
     private func isRunning(_ process: AudioObjectID, _ address: inout AudioObjectPropertyAddress) -> Bool {

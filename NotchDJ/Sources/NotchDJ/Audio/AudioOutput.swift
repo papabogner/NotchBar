@@ -25,9 +25,6 @@ struct AudioOutput: Equatable {
         transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
     }
 
-    /// Headphones and speakers that come and go: Bluetooth and AirPlay.
-    var isWireless: Bool { isBluetooth || transport == kAudioDeviceTransportTypeAirPlay }
-
     var symbol: String {
         let lower = name.lowercased()
         if lower.contains("airpods max") { return "airpodsmax" }

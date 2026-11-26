@@ -279,17 +279,6 @@ final class AppVolumeMixer: ObservableObject {
         statusMessage = nil
     }
 
-    func openPrivacySettings() {
-        let urls = [
-            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AudioCapture",
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture",
-        ]
-        for text in urls {
-            guard let url = URL(string: text), NSWorkspace.shared.open(url) else { continue }
-            return
-        }
-    }
-
     // MARK: Settings
 
     func setDucking(_ on: Bool) {
@@ -355,8 +344,6 @@ final class AppVolumeMixer: ObservableObject {
     var needsApplyHint: Bool {
         !isPreview && !engaged && !(autoApply && capture == .authorized) && rows.contains { $0.level != 100 || $0.muted }
     }
-
-    var canRemember: Bool { capture == .authorized }
 
     // MARK: Visibility
 
@@ -879,12 +866,6 @@ final class AppVolumeMixer: ObservableObject {
     /// The system default output, for the settings menu.
     func currentOutputUID() -> String { isPreview ? "" : systemAudio.currentOutputUID() }
 
-    /// Fills the device menu. Settings can open before the panel does.
-    func refreshDevices() {
-        refreshOutputChoices()
-        refreshMaster()
-    }
-
     /// Reads the Core Audio device list once per output change, not on every redraw.
     private func refreshOutputChoices() {
         guard !isPreview else { return }
@@ -1045,14 +1026,6 @@ private final class MixerEngine: @unchecked Sendable {
     private var healthScheduled = false
     private var metering = false
     private var meterScheduled = false
-    private let countLock = NSLock()
-    private var liveTaps = 0
-
-    var tapCount: Int {
-        countLock.lock()
-        defer { countLock.unlock() }
-        return liveTaps
-    }
 
     init(mixer: AppVolumeMixer) {
         hop = MixerEngineHop(mixer)
@@ -1063,7 +1036,6 @@ private final class MixerEngine: @unchecked Sendable {
             guard let self else { return }
             var outcome = self.apply(job)
             outcome.completesSync = true
-            self.noteCount()
             self.hop.send(outcome)
         }
     }
@@ -1072,7 +1044,6 @@ private final class MixerEngine: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self else { return }
             self.stopAllOnQueue()
-            self.noteCount()
         }
     }
 
@@ -1239,13 +1210,6 @@ private final class MixerEngine: @unchecked Sendable {
         taps.removeAll()
     }
 
-    private func noteCount() {
-        let count = taps.count
-        countLock.lock()
-        liveTaps = count
-        countLock.unlock()
-    }
-
     /// A route, a duck, a real crossfade pull, solo, mute, or a level other than 100%.
     /// Gain 1.0 with none of those leaves the app on its own stream.
     private func wantsTap(id: String, level: Level?, solo: String?, route: String?, duck: Float?, cross: Float?, filters: Bool) -> Bool {
@@ -1292,7 +1256,6 @@ private final class MixerEngine: @unchecked Sendable {
             if self.taps.contains(where: { Date().timeIntervalSince($0.value.createdAt) < 0.8 && !$0.value.healthChecked }) {
                 self.scheduleHealthCheck()
             }
-            self.noteCount()
             self.publish(outcome)
         }
     }

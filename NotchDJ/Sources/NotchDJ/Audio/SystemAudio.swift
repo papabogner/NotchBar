@@ -108,11 +108,6 @@ final class SystemAudio {
         return m != 0
     }
 
-    var canSetVolume: Bool {
-        var settable = DarwinBoolean(false)
-        return AudioObjectIsPropertySettable(device, &Self.volumeAddress, &settable) == noErr && settable.boolValue
-    }
-
     func setVolume(_ value: Float) {
         var v = Float32(min(1, max(0, value)))
         AudioObjectSetPropertyData(device, &Self.volumeAddress, 0, nil, 4, &v)
