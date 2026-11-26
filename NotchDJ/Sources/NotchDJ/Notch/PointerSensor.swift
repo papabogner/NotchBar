@@ -2,7 +2,7 @@
 // Original copyright remains with the NotchBar authors. Notch DJ changes are under the same license.
 import AppKit
 
-/// A nearly invisible window over the closed notch that tells NotchBar when the pointer arrives.
+/// A nearly invisible window over the closed notch that tells Notch DJ when the pointer arrives.
 ///
 /// Watching every pointer move on the screen wakes the app dozens of times a second while you
 /// use the mouse. This window gets one event when the pointer enters it and nothing otherwise,
@@ -34,10 +34,6 @@ final class PointerSensor {
         if window.frame != rect { window.setFrame(rect, display: false) }
         if !window.isVisible { window.orderFrontRegardless() }
     }
-
-    var debugSummary: String { "visible=\(window.isVisible) frame=\(NSStringFromRect(window.frame))" }
-
-    func setHiddenFromCapture(_ hidden: Bool) { window.sharingType = hidden ? .none : .readOnly }
 
     func hide() {
         if window.isVisible { window.orderOut(nil) }

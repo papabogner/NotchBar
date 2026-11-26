@@ -11,11 +11,11 @@ enum InputAxis { case vertical, horizontal, both }
 /// A scroll counts as one interaction: `onBegin` on the first event, `onEnd` 0.6 s after the last.
 struct InputSurface: NSViewRepresentable {
     var axis: InputAxis = .both
-    var onBegin: () -> Void = {}
-    var onDrag: (CGSize, Bool) -> Void
-    var onEnd: () -> Void = {}
-    var onDoubleClick: () -> Void = {}
-    var onScroll: (CGSize, Bool) -> Void
+    var onBegin: @MainActor () -> Void = {}
+    var onDrag: @MainActor (CGSize, Bool) -> Void
+    var onEnd: @MainActor () -> Void = {}
+    var onDoubleClick: @MainActor () -> Void = {}
+    var onScroll: @MainActor (CGSize, Bool) -> Void
 
     func makeNSView(context: Context) -> SurfaceView {
         let view = SurfaceView()
@@ -38,11 +38,11 @@ struct InputSurface: NSViewRepresentable {
 
     final class SurfaceView: NSView {
         var axis: InputAxis = .both
-        var onBegin: (() -> Void)?
-        var onDrag: ((CGSize, Bool) -> Void)?
-        var onEnd: (() -> Void)?
-        var onDoubleClick: (() -> Void)?
-        var onScroll: ((CGSize, Bool) -> Void)?
+        var onBegin: (@MainActor () -> Void)?
+        var onDrag: (@MainActor (CGSize, Bool) -> Void)?
+        var onEnd: (@MainActor () -> Void)?
+        var onDoubleClick: (@MainActor () -> Void)?
+        var onScroll: (@MainActor (CGSize, Bool) -> Void)?
         private var dragging = false
         private var scrolling = false
 

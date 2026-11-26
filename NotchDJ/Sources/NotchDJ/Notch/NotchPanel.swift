@@ -19,6 +19,7 @@ final class NotchPanel: NSPanel {
         ignoresMouseEvents = true
         level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // DJWindow switches this to match the template, so menus and system controls follow it.
         appearance = NSAppearance(named: .darkAqua)
     }
 
