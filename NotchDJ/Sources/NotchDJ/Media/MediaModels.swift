@@ -2,12 +2,12 @@
 // Original copyright remains with the NotchBar authors. Notch DJ changes are under the same license.
 import AppKit
 
-/// An app that can play media, and how NotchBar talks to it.
+/// An app that can play media, and how Notch DJ talks to it.
 struct MediaSource: Equatable, Hashable, Sendable {
     enum Kind: Equatable, Sendable {
         /// Read and controlled through AppleScript.
-        case music, spotify, vlc
-        /// A browser: the playing tab's title is read through AppleScript.
+        case music, spotify
+        /// A browser. Only the media keys reach it.
         case chromium, safari
         /// Any other app making sound. Only its name and icon are known.
         case generic
@@ -18,8 +18,7 @@ struct MediaSource: Equatable, Hashable, Sendable {
 
     static let music = MediaSource(bundleID: "com.apple.Music", kind: .music)
     static let spotify = MediaSource(bundleID: "com.spotify.client", kind: .spotify)
-    static let vlc = MediaSource(bundleID: "org.videolan.vlc", kind: .vlc)
-    static let scriptable: [MediaSource] = [.music, .spotify, .vlc]
+    static let scriptable: [MediaSource] = [.music, .spotify]
 
     private static let chromiumBrowsers: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.beta", "com.microsoft.edgemac", "com.brave.Browser",
@@ -33,7 +32,7 @@ struct MediaSource: Equatable, Hashable, Sendable {
         return MediaSource(bundleID: id, kind: .generic)
     }
 
-    var isScriptable: Bool { kind == .music || kind == .spotify || kind == .vlc }
+    var isScriptable: Bool { kind == .music || kind == .spotify }
     var isBrowser: Bool { kind == .chromium || kind == .safari }
     /// Controlled with the system media keys, which needs Accessibility access.
     var usesMediaKeys: Bool { !isScriptable }
@@ -72,12 +71,6 @@ struct NowPlaying: Equatable, Sendable {
     var fetchedAt = Date()
     var isPlaying: Bool
     var artworkURL: URL?
-    /// The browser tab this came from.
-    var tab: TabRef?
-    /// True when the page itself reported this, so position and controls are exact.
-    var isPageScripted = false
-
-    struct TabRef: Equatable, Sendable { let window: Int; let index: Int }
 
     var hasTimeline: Bool { duration > 0 }
 

@@ -68,6 +68,12 @@ final class HotkeyController: ObservableObject {
     }
 }
 
+/// The process-wide hotkey owner. Settings and onboarding read it without holding the app delegate.
+@MainActor
+enum DJHotkeys {
+    static let shared = HotkeyController()
+}
+
 private func notchHotKeyHandler(_ next: EventHandlerCallRef?, _ event: EventRef?, _ user: UnsafeMutableRawPointer?) -> OSStatus {
     guard let event else { return noErr }
     var hotKeyID = EventHotKeyID(signature: 0, id: 0)

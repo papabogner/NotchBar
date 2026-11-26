@@ -2,12 +2,12 @@
 // Original copyright remains with the NotchBar authors. Notch DJ changes are under the same license.
 import AppKit
 
-/// AppleScript access to Music, Spotify and VLC.
+/// AppleScript access to Music and Spotify.
 ///
 /// Every call here blocks on an Apple Event, so call these off the main thread. Only call them
 /// for apps that are already running: sending an event to a closed app launches it.
 enum PlayerScripts {
-    enum Command { case toggle, next, previous }
+    enum Command: Sendable { case toggle, next, previous }
 
     private static let separator = "\u{1F}"
 
@@ -22,11 +22,9 @@ enum PlayerScripts {
     }
 
     static func send(_ command: Command, to source: MediaSource) {
+        guard source.isScriptable else { return }
         let verb: String
         switch (source.kind, command) {
-        case (.vlc, .toggle): verb = "play"
-        case (.vlc, .next): verb = "next"
-        case (.vlc, .previous): verb = "previous"
         case (_, .toggle): verb = "playpause"
         case (_, .next): verb = "next track"
         case (.music, .previous): verb = "back track"
@@ -36,13 +34,11 @@ enum PlayerScripts {
     }
 
     static func seek(_ source: MediaSource, to seconds: Double) {
-        let command = source.kind == .vlc
-            ? "set current time to \(Int(seconds))"
-            : "set player position to \(String(format: "%.2f", seconds))"
-        run("tell application id \"\(source.bundleID)\" to \(command)")
+        guard source.isScriptable else { return }
+        run("tell application id \"\(source.bundleID)\" to set player position to \(String(format: "%.2f", seconds))")
     }
 
-    static func musicArtwork() -> NSImage? {
+    static func musicArtwork() -> Data? {
         let script = """
         tell application id "com.apple.Music"
             try
@@ -52,8 +48,8 @@ enum PlayerScripts {
             end try
         end tell
         """
-        guard let data = run(script)?.data, let image = NSImage(data: data), image.isValid else { return nil }
-        return image
+        guard let data = run(script)?.data, !data.isEmpty else { return nil }
+        return data
     }
 
     static func spotifyArtworkURL() -> URL? {
@@ -67,13 +63,6 @@ enum PlayerScripts {
         var error: NSDictionary?
         let result = NSAppleScript(source: "with timeout of 3 seconds\n\(source)\nend timeout")?.executeAndReturnError(&error)
         return error == nil ? result : nil
-    }
-
-    /// Like `run`, but also returns the error message, to tell "turned off" from "nothing there".
-    static func runReportingError(_ source: String) -> (NSAppleEventDescriptor?, String?) {
-        var error: NSDictionary?
-        let result = NSAppleScript(source: "with timeout of 3 seconds\n\(source)\nend timeout")?.executeAndReturnError(&error)
-        return error == nil ? (result, nil) : (nil, error?[NSAppleScript.errorMessage] as? String ?? "error")
     }
 
     private static func stateScript(for source: MediaSource) -> String? {
@@ -93,22 +82,6 @@ enum PlayerScripts {
                 if player state is stopped then return ""
                 set t to current track
                 return (id of t) & "\(s)" & (name of t) & "\(s)" & (artist of t) & "\(s)" & (album of t) & "\(s)" & (((duration of t) / 1000) as string) & "\(s)" & ((player position) as string) & "\(s)" & ((player state) as string)
-            end tell
-            """
-        case .vlc:
-            return """
-            tell application id "org.videolan.vlc"
-                try
-                    set n to name of current item
-                on error
-                    return ""
-                end try
-                if playing then
-                    set state to "playing"
-                else
-                    set state to "paused"
-                end if
-                return n & "\(s)" & n & "\(s)" & "VLC" & "\(s)" & "" & "\(s)" & ((duration of current item) as string) & "\(s)" & ((current time) as string) & "\(s)" & state
             end tell
             """
         default:
