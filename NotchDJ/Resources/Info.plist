@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>Notch DJ</string>
+    <key>CFBundleDisplayName</key><string>Notch DJ</string>
+    <key>CFBundleIdentifier</key><string>com.local.notchdj</string>
+    <key>CFBundleExecutable</key><string>NotchDJ</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.2.0</string>
+    <key>CFBundleVersion</key><string>2</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>de</string>
+    </array>
+    <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSHumanReadableCopyright</key><string>Based on NotchBar by srisanthosh. GPLv3.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>Notch DJ changes the volume of single apps by processing their audio live on this Mac. Nothing is recorded, stored or sent anywhere.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Notch DJ shows the current track from Music and Spotify, and plays, pauses, skips and seeks when you ask it to.</string>
+</dict>
+</plist>
