@@ -120,28 +120,24 @@ final class MeterBank {
         entries = entries.filter { now - $0.value.updated < 5 }
     }
 
+    /// One app's meter, or the master (the loudest app) for nil.
     func frame(_ id: String?, at now: TimeInterval) -> MeterFrame {
-        guard let id else { return .silent }
-        if simulated { return Self.fake(seed: Self.seed(id), at: now) }
+        if simulated { return Self.fake(seed: id.map(Self.seed) ?? 0.37, at: now) }
+        guard let id else { return Self.frame(master, at: now) }
         guard let entry = entries[id] else { return .silent }
         return Self.frame(entry, at: now)
     }
 
-    func masterFrame(at now: TimeInterval) -> MeterFrame {
-        if simulated { return Self.fake(seed: 0.37, at: now) }
-        return Self.frame(master, at: now)
-    }
-
-    /// Recent levels, oldest first. Always `MeterScale.historyLength` values.
+    /// Recent levels, oldest first. Always `MeterScale.historyLength` values. Nil is the master.
     func history(_ id: String?, at now: TimeInterval) -> [Float] {
-        guard let id else { return Self.emptyHistory }
         if simulated {
-            let seed = Self.seed(id)
+            let seed = id.map(Self.seed) ?? 0.37
             return (0..<MeterScale.historyLength).map { index in
                 let age = Double(MeterScale.historyLength - 1 - index) / 30
                 return Self.fake(seed: seed, at: now - age).level
             }
         }
+        guard let id else { return master.history.ordered }
         return entries[id]?.history.ordered ?? Self.emptyHistory
     }
 
@@ -150,20 +146,20 @@ final class MeterBank {
         master = Entry()
     }
 
-    private static var emptyHistory: [Float] { [Float](repeating: 0, count: MeterScale.historyLength) }
+    nonisolated private static var emptyHistory: [Float] { [Float](repeating: 0, count: MeterScale.historyLength) }
 
-    private static func frame(_ entry: Entry, at now: TimeInterval) -> MeterFrame {
+    nonisolated private static func frame(_ entry: Entry, at now: TimeInterval) -> MeterFrame {
         MeterFrame(left: entry.left.level(at: now), right: entry.right.level(at: now),
                    holdLeft: entry.left.holdLevel(at: now), holdRight: entry.right.holdLevel(at: now))
     }
 
-    private static func seed(_ id: String) -> Double {
+    nonisolated private static func seed(_ id: String) -> Double {
         let sum = id.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF }
         return Double(sum % 997) / 997
     }
 
     /// A steady beat with a little movement, for previews only.
-    private static func fake(seed: Double, at now: TimeInterval) -> MeterFrame {
+    nonisolated private static func fake(seed: Double, at now: TimeInterval) -> MeterFrame {
         let beat = pow(max(0, sin(now * .pi * 4 + seed * 9)), 6)
         let drift = 0.5 + 0.18 * sin(now * (0.7 + seed) + seed * 20)
         let left = Float(min(0.98, max(0, drift + 0.3 * beat)))
