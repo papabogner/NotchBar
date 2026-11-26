@@ -51,7 +51,7 @@ final class DJDelegate: NSObject, NSApplicationDelegate {
 }
 
 final class DJMenuDelegate: NSObject, NSMenuDelegate {
-    static let shared = DJMenuDelegate()
+    @MainActor static let shared = DJMenuDelegate()
 
     func menuWillOpen(_ menu: NSMenu) {
         MainActor.assumeIsolated {

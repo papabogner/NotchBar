@@ -2,7 +2,7 @@ import Foundation
 
 /// Notch DJ's own defaults. This is not NotchBar's domain.
 enum DJDefaults {
-    static let suite: UserDefaults = {
+    nonisolated(unsafe) static let suite: UserDefaults = {
         UserDefaults(suiteName: "com.local.notchdj") ?? .standard
     }()
 
