@@ -78,7 +78,7 @@ Menu bar    icon: Automatic (Macs without a notch) / Always / Never
 | Artwork HOME ↔ DJ | `matchedGeometryEffect` on the playing deck, same spring | none |
 | Meters | 30 fps `TimelineView`, only while the panel is open; instant attack, 26 dB/s release, 1 s peak hold then 14 dB/s | unchanged (information) |
 | Platter (Club) | 33⅓ rpm while that deck plays | static |
-| Onboarding | wordmark letters stagger 45 ms; steps slide 24 pt and fade | fade only |
+| Onboarding | notch grows into the wordmark, letters stagger 45 ms; steps fade and scale from 98 % | fade only |
 
 Idle budget: no timers while the panel is closed. Meter-only taps are removed 2 s after the panel closes.
 
@@ -96,19 +96,19 @@ All templates share `AppVolumeMixer`, `NowPlayingMonitor`, `MeterBank` and the c
 
 **Tokens** (`ThemeTokens`) cover:
 
-- Colours: `panel`, `surface`, `raised`, `line`, `text`, `secondary`, `tertiary`, `accent`, `onAccent`, `deckA`, `deckB`, and the meter colours (`meterLow`, `meterMid`, `meterHot`, `meterOff`).
-- Radii: `panelRadius`, `cardRadius`, `controlRadius`.
-- Fonts: `title`, `body`, `label`, `value`, `display`, plus `labelTracking` and `uppercaseLabels`.
+- Colors: `panel`, `header` and `headerText` (the band beside the notch), `surface`, `raised`, `line`, `text`, `secondary`, `tertiary`, `accent`, `onAccent`, `deckA`, `deckB`, and the meter colors (`meterLow`, `meterMid`, `meterHot`, `meterOff`).
+- Radii and lines: `panelRadius`, `cardRadius`, `controlRadius`, `lineWidth`.
+- Type: `textDesign`, the text roles `display`, `title`, `body`, `caption`, `label`, `value` and `bigValue` (set with `.djFont(_:)`), plus `labelTracking` and `uppercaseLabels`.
 - Styles: `knob` (`.arc`, `.line`, `.ledRing`, `.solid`), `fader` (`.slim`, `.line`, `.hardware`, `.thick`), `meter` (`.bar`, `.segments`, `.led`) and `card` (`.filled`, `.outlined`, `.plain`).
 
 **Adding a template:**
 
-1. Add a case to `TemplateID`.
-2. Write `struct MyTemplate: DJTemplate`. It provides `tokens(for:)`, `supportsLight`, `name`, `blurb` and `makeDJView(_:)`.
-3. Return it from `TemplateID.template`.
-4. Add the name and blurb to `en.lproj` and `de.lproj`.
+1. Add a case to `TemplateID` in `Theme/Templates.swift`, and return your template from `TemplateID.template`.
+2. Write `struct MyTemplate: DJTemplate` next to the others. It provides `id`, `name`, `blurb`, `supportsLight`, `supportsDark`, `tokens(dark:)` and `@MainActor makeDJView()`.
+3. Put the layout in `Panel/DJ/MyDJLayout.swift`. Build it from the shared pieces in `Panel/DJ/DeckSupport.swift`: `DeckControls` for the bindings, plus `ToneKnob`, `DeckFader`, `CueButton`, `DeckTitle`, `DeckArtwork`, `DeckWave`, `DeckCrossfader`, `CurvePicker` and `EmptyDeck`. Size everything from `\.panelMetrics`, so the layout works at all three panel sizes.
+4. Run `python3 scripts/extract-strings.py --check`, then add the new name and blurb to `Resources/en.lproj` and `Resources/de.lproj`.
 
-Controls read the tokens from the environment, so HOME, MIXER, Settings and Onboarding pick up the new style without further changes.
+Controls read the tokens from the environment, so HOME, MIXER, the template picker previews and onboarding pick up the new style without further changes. Settings always uses the Studio tokens.
 
 ## Permissions
 
